@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Pre-push guard for the public source repository. For every commit being pushed: export its
+# tree, run tools/scan_sensitive.py on it (secrets, personal data, identity tokens; prints paths
+# and rule names only) and check that author/committer identities are the generic ones.
+# The push is refused on ANY finding, on a scanner error (non-zero exit), or when python3 or the
+# scanner is missing. There is no allow-list: the scanner reports nothing on this tree, its own
+# source included.
+set -uo pipefail
+root=$(git rev-parse --show-toplevel)
+scanner="$root/tools/scan_sensitive.py"
+refuse() { echo "pre-push: REFUSED: $*" >&2; exit 1; }
+command -v python3 > /dev/null || refuse "python3 not found"
+[[ -f $scanner ]] || refuse "scanner missing: tools/scan_sensitive.py"
+zero=0000000000000000000000000000000000000000
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [[ $local_sha == "$zero" ]] && continue
+  range=$local_sha; [[ $remote_sha != "$zero" ]] && range="$remote_sha..$local_sha"
+  commits=$(git rev-list "$range") || refuse "cannot list commits for $range"
+  for c in $commits; do
+    ids=$(git log -1 --format='%an <%ae>|%cn <%ce>' "$c") || refuse "cannot read identity of ${c:0:9}"
+    [[ $ids == "agents-mailroom <store@localhost>|agents-mailroom <store@localhost>" ]] \
+      || refuse "commit ${c:0:9} has a non-generic author/committer identity"
+    tmp=$(mktemp -d) || refuse "mktemp failed"
+    git archive "$c" | tar -x -C "$tmp" || { rm -rf "$tmp"; refuse "cannot export ${c:0:9}"; }
+    out=$(python3 -I "$scanner" "$tmp"); rc=$?
+    rm -rf "$tmp"
+    ((rc == 0)) || refuse "scanner failed with exit code $rc on ${c:0:9}"
+    if [[ -n $out ]]; then echo "pre-push: findings in ${c:0:9} (path, kind, rule, count):" >&2; echo "$out" >&2; refuse "sensitive findings"; fi
+  done
+done
+echo "pre-push: scan passed (scanner exit 0, no findings, generic identity)" >&2
+exit 0
