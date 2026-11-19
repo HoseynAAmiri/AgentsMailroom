@@ -1,4 +1,4 @@
-import type { Agent, MailTask, Presence } from "./types";
+import type { Agent, BusEvent, MailTask, Presence } from "./types";
 
 export function ageMin(ts?: string | null): number {
   if (!ts) return Infinity;
@@ -116,22 +116,74 @@ export function shortName(id: string, agents: Map<string, Agent>): string {
   return a && a.name && a.name !== id ? `${id} · ${a.name}` : id;
 }
 
-export const STALE_MIN = 45;
+export const ACTIVE_MIN = 15;
+export const IDLE_MIN = 60;
+export const MAX_FUTURE_SKEW_MS = 5_000;
+export const TEMP_LIFECYCLE_STATES = ["starting", "expired", "stopped", "finished", "failed"] as const;
 
-export function effectiveState(a: Agent): string {
+export function isFutureOutlier(ms: number, nowMs: number = Date.now()): boolean {
+  return ms - nowMs > MAX_FUTURE_SKEW_MS;
+}
+
+export function resolveActivityNow(tickNowMs: number, snapshotReceivedAtMs?: number | null): number {
+  if (snapshotReceivedAtMs != null && Number.isFinite(snapshotReceivedAtMs)) {
+    return Math.max(tickNowMs, snapshotReceivedAtMs);
+  }
+  return tickNowMs;
+}
+
+export function buildLastActivityMap(events: readonly BusEvent[], nowMs: number = Date.now()): Map<string, string> {
+  const m = new Map<string, string>();
+  const bestMs = new Map<string, number>();
+  for (const e of events) {
+    if (!e.from || e.from === "user" || !e.ts) continue;
+    const ms = Date.parse(e.ts);
+    if (!Number.isFinite(ms) || isFutureOutlier(ms, nowMs)) continue;
+    if (ms > (bestMs.get(e.from) ?? -Infinity)) {
+      bestMs.set(e.from, ms);
+      m.set(e.from, e.ts);
+    }
+  }
+  return m;
+}
+
+export function latestActivityTs(a: Agent, latestBusTs?: string | null, nowMs: number = Date.now()): string | null {
+  let bestTs: string | null = null;
+  let bestMs = -Infinity;
+  for (const ts of [a.last_active, latestBusTs]) {
+    if (!ts) continue;
+    const ms = Date.parse(ts);
+    if (Number.isFinite(ms) && !isFutureOutlier(ms, nowMs) && ms > bestMs) {
+      bestMs = ms;
+      bestTs = ts;
+    }
+  }
+  return bestTs;
+}
+
+export function effectiveState(a: Agent, latestBusTs?: string | null, nowMs: number = Date.now()): string {
   if (a.retired) return "retired";
-  const last = a.last_active || a.updated_at;
-  if (a.state === "working" && ageMin(last) > STALE_MIN) return "stale";
-  return a.state || "idle";
+  if (a.kind === "temporary" && a.state && (TEMP_LIFECYCLE_STATES as readonly string[]).includes(a.state)) {
+    return a.state;
+  }
+  const last = latestActivityTs(a, latestBusTs, nowMs);
+  if (!last) return "inactive";
+  const age = (nowMs - Date.parse(last)) / 60000;
+  if (!Number.isFinite(age) || age < -(MAX_FUTURE_SKEW_MS / 60000)) return "inactive";
+  if (age < ACTIVE_MIN) return "active";
+  if (age <= IDLE_MIN) return "idle";
+  return "inactive";
 }
 
 export const STATE_DOT: Record<string, string> = {
+  active: "bg-emerald-500",
   working: "bg-sky-500",
   starting: "bg-sky-400 animate-pulse",
   waiting: "bg-amber-500",
   stale: "bg-amber-400 ring-1 ring-amber-600/40",
   failed: "bg-red-500",
-  idle: "bg-zinc-400",
+  idle: "bg-amber-400",
+  inactive: "bg-zinc-300 dark:bg-zinc-600",
   offline: "bg-zinc-300 dark:bg-zinc-600",
   retired: "bg-zinc-300 dark:bg-zinc-600",
   expired: "bg-zinc-300 dark:bg-zinc-600",

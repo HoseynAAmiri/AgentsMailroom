@@ -9,6 +9,7 @@ type WireSnapshot = Omit<Snapshot, "tasks"> & { tasks?: Snapshot["tasks"] };
 export interface BusData {
   snap: Snapshot | null;
   events: BusEvent[];
+  snapshotReceivedAt: number | null;
   connected: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -19,6 +20,7 @@ export interface BusData {
 export function useBus(): BusData {
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [events, setEvents] = useState<BusEvent[]>([]);
+  const [snapshotReceivedAt, setSnapshotReceivedAt] = useState<number | null>(null);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const lastId = useRef<string | null>(null);
@@ -39,6 +41,7 @@ export function useBus(): BusData {
       const res = await fetch(`/api/snapshot${q.size ? `?${q}` : ""}`, { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as WireSnapshot;
+      setSnapshotReceivedAt(Date.now());
       setEvents((prev) => (data.full ? data.events : data.events.length ? [...prev, ...data.events] : prev));
       lastId.current = data.last_id;
       cursor.current = data.event_cursor ?? null;
@@ -81,7 +84,7 @@ export function useBus(): BusData {
     setSnap((s) => (s ? { ...s, user_state: us } : s));
   }, []);
 
-  return { snap, events, connected, error, refresh, setUserState };
+  return { snap, events, snapshotReceivedAt, connected, error, refresh, setUserState };
 }
 
 export function useNow(intervalMs = 1000): number {

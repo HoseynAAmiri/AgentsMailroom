@@ -27,9 +27,9 @@ export function Tip({ label, children, className, side }: { label: string; child
 }
 
 export function AgentAvatar({ id, size = "md", agent, showState }: { id: string; size?: "sm" | "md" | "lg"; agent?: Agent; showState?: boolean }) {
-  const { avatarColors } = useMailroom();
+  const { avatarColors, lastActivity, activityNow } = useMailroom();
   const dim = size === "sm" ? "size-6 text-[10px]" : size === "lg" ? "size-10 text-sm" : "size-8 text-xs";
-  const st = showState && agent ? effectiveState(agent) : null;
+  const st = showState && agent ? effectiveState(agent, lastActivity.get(agent.id), activityNow) : null;
   return (
     <span className="relative inline-flex shrink-0">
       <span
@@ -43,7 +43,7 @@ export function AgentAvatar({ id, size = "md", agent, showState }: { id: string;
           "absolute rounded-full ring-background",
           size === "sm" ? "right-[3.5%] bottom-[3.5%] size-[28%]" : "right-[5%] bottom-[5%] size-1/4",
           size === "sm" ? "ring-1" : size === "md" ? "ring-[1.5px]" : "ring-2",
-          STATE_DOT[st] ?? STATE_DOT.idle,
+          STATE_DOT[st] ?? STATE_DOT.inactive,
         )} />
       )}
     </span>
@@ -51,7 +51,7 @@ export function AgentAvatar({ id, size = "md", agent, showState }: { id: string;
 }
 
 export function StateDot({ state, className }: { state: string; className?: string }) {
-  return <span className={cn("inline-block size-2 shrink-0 rounded-full", STATE_DOT[state] ?? STATE_DOT.idle, className)} />;
+  return <span className={cn("inline-block size-2 shrink-0 rounded-full", STATE_DOT[state] ?? STATE_DOT.inactive, className)} />;
 }
 
 const CLI_ICON: Record<string, typeof Bot> = {
