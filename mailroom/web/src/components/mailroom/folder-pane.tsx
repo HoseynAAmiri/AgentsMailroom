@@ -40,7 +40,7 @@ function FolderRow({
       )}
     >
       {Icon && <Icon className={cn("size-4 shrink-0", !on && "text-muted-foreground")} />}
-      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <span className={cn("min-w-0 flex-1", typeof label === "string" && "truncate")}>{label}</span>
       {extra}
       {(!!count || hoverIcon) && (
         <span className="grid shrink-0 items-center justify-items-end">
