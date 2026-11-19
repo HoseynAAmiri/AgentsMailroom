@@ -176,6 +176,10 @@ curl -fsS http://127.0.0.1:8766/api/agents/worker/instructions |
 # On the Mailroom host, get the same prompt directly from the local CLI.
 python3 mailroom/bus/bus.py instructions --agent worker
 
+# Inspect team members, roles, live availability, and allowed routes (`GET /api/team` or CLI).
+python3 mailroom/bus/bus_client.py team
+python3 mailroom/bus/bus_client.py team --available
+
 # List the HTTP client's commands and the available task subcommands.
 python3 mailroom/bus/bus_client.py --help
 python3 mailroom/bus/bus_client.py todo --help

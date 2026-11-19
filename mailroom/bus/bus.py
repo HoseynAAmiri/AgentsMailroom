@@ -1281,6 +1281,7 @@ Rules:
 - Find your past messages without changing unread state:
   {bus} search --agent {aid} --q "<keywords>" --task-id <id>
   The keyword and task filters are optional. Use --event-id to look up a known message.
+- Check who is on the team, their roles, availability, and allowed routes with {bus} team.
 - Read project task state with `{bus} todo list` and `{bus} todo show <task id>`. Use `todo update <task id> --agent {aid} --revision <current revision>` with --state or --next-action for explicit task edits.
 - Report progress to the team with {bus} status --agent {aid} --state working --summary "Short progress update". For a USER decision, post --type human.needed --to user with the task ID, question and available options.
 - After handling messages: {bus} mark-seen --agent {aid} --event-id <last handled event id>
@@ -1728,8 +1729,91 @@ def cmd_instructions(args: argparse.Namespace) -> int:
     return 0
 
 
+def member_availability(agent: dict[str, Any], pres: dict[str, Any], now: datetime) -> str:
+    """Derive live availability from registry flags, agent state, and recent inbox/status activity."""
+    if agent.get("retired"):
+        return "retired"
+    if agent_ended(agent):
+        return "ended"
+    state = agent.get("state") or "idle"
+    if state in ("offline", "failed"):
+        return state
+    listening = bool(pres.get("listening"))
+    recent_ts = parse_ts(agent.get("last_active")) or parse_ts(agent.get("updated_at"))
+    active_recently = bool(recent_ts and (now - recent_ts).total_seconds() < LISTENING_MIN * 60)
+    if listening or active_recently:
+        return "busy" if state == "working" else "available"
+    return "away"
+
+
+def team_roster(*, include_all: bool = False, available_only: bool = False) -> dict[str, Any]:
+    """List team members with role, machine, live state/availability, and allowed peer routes."""
+    data = load_agents()
+    links = get_links(data)
+    machines = {m["id"]: m.get("label") or m["id"] for m in get_machines(data)}
+    with _EVENT_INDEX.lock:
+        _EVENT_INDEX.refresh()
+        live_presence = presence(_EVENT_INDEX, data)
+    now = datetime.now(timezone.utc)
+    members = []
+    for a in data.get("agents", []):
+        aid = a.get("id") or ""
+        if not aid or ("." in aid and not include_all):
+            continue
+        retired = bool(a.get("retired"))
+        ended = agent_ended(a)
+        if not include_all and (retired or ended):
+            continue
+        kind = a.get("kind") or ("subagent" if "." in aid else "permanent")
+        pres = live_presence.get(aid) or {}
+        availability = member_availability(a, pres, now)
+        available = availability == "available"
+        reachable = availability in ("available", "busy")
+        if available_only and not available:
+            continue
+        peers = [p for p in agent_peers(aid, data) if not agent_ended(find_agent(data, p))]
+        role = (a.get("role") or "").strip() or (ROLE_PRESETS.get(a.get("role_preset") or "", {}).get("label") or "")
+        machine_id = a.get("machine") or "A"
+        members.append(
+            {
+                "id": aid,
+                "name": a.get("name") or aid,
+                "role": role,
+                "role_preset": a.get("role_preset"),
+                "kind": kind,
+                "machine": machine_id,
+                "machine_label": machines.get(machine_id, machine_id),
+                "state": a.get("state") or "idle",
+                "availability": availability,
+                "available": available,
+                "reachable": reachable,
+                "listening": bool(pres.get("listening")),
+                "summary": a.get("summary") or "",
+                "unread": pres.get("unread", 0),
+                "checked_at": pres.get("checked_at"),
+                "checked_min_ago": pres.get("checked_min_ago"),
+                "updated_at": a.get("updated_at"),
+                "last_active": a.get("last_active"),
+                "retired": retired,
+                "ended": ended,
+                "peers": peers,
+            }
+        )
+    return {
+        "members": members,
+        "links": links,
+        "listening_window_min": LISTENING_MIN,
+        "generated_at": utc_now(),
+    }
+
+
 def cmd_links(args: argparse.Namespace) -> int:
     print(json.dumps(get_links(), indent=2))
+    return 0
+
+
+def cmd_team(args: argparse.Namespace) -> int:
+    print(json.dumps(team_roster(include_all=args.all, available_only=args.available), indent=2))
     return 0
 
 
@@ -1913,6 +1997,11 @@ class BusHandler(SimpleHTTPRequestHandler):
             return
         if parsed.path == "/api/agents":
             self._send_json(200, load_agents())
+            return
+        if parsed.path == "/api/team":
+            include_all = qs.get("all", ["0"])[0] in {"1", "true", "yes"}
+            available_only = qs.get("available", ["0"])[0] in {"1", "true", "yes"}
+            self._send_json(200, team_roster(include_all=include_all, available_only=available_only))
             return
         if parsed.path == "/api/tasks":
             with _EVENT_INDEX.lock:
@@ -2281,6 +2370,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     links = sub.add_parser("links", help="Print who may message whom")
     links.set_defaults(func=cmd_links)
+
+    team = sub.add_parser("team", help="List team members, roles, live availability, and allowed routes")
+    team.add_argument("--all", action="store_true", help="include retired and ended agents")
+    team.add_argument("--available", action="store_true", help="only list currently available agents")
+    team.set_defaults(func=cmd_team)
 
     serve = sub.add_parser("serve", help="Serve dashboard + API")
     serve.add_argument("--host", default="127.0.0.1")

@@ -2,6 +2,7 @@
 """HTTP client for the agent bus, for agents on another machine (stdlib only).
 
 Same commands as bus.py, talking to the bus server instead of the files:
+  python3 bus_client.py team [--available] [--all]
   python3 bus_client.py inbox --agent worker
   python3 bus_client.py search --agent worker --q "keywords" [--task-id R1]
   python3 bus_client.py post --from worker --to coordinator --body "..." [--cc reviewer] [--in-reply-to e123] [--task-id R1] [--ref file:...]
@@ -124,6 +125,9 @@ def main(argv=None):
     st.add_argument("--state", required=True, choices=["working", "idle", "waiting", "failed", "offline"])
     st.add_argument("--summary", required=True)
     st.add_argument("--task-id")
+    team = sub.add_parser("team", help="List team members, roles, availability, and allowed routes")
+    team.add_argument("--all", action="store_true", help="include retired and ended agents")
+    team.add_argument("--available", action="store_true", help="only list currently available agents")
     a = p.parse_args(argv)
 
     if a.cmd == "todo":
@@ -152,6 +156,13 @@ def main(argv=None):
         out = call("GET", f"/api/wait/{a.agent}?timeout={a.timeout}", timeout=a.timeout + 30)
     elif a.cmd == "mark-seen":
         out = call("POST", "/api/mark-seen", {"agent": a.agent, "event_id": a.event_id})
+    elif a.cmd == "team":
+        params = {}
+        if a.all:
+            params["all"] = "1"
+        if a.available:
+            params["available"] = "1"
+        out = call("GET", "/api/team" + ("?" + urlencode(params) if params else ""))
     else:
         out = call("POST", "/api/events", {"type": "agent.status", "from": a.agent, "to": "*", "state": a.state, "body": a.summary, "task_id": a.task_id})
     print(json.dumps(out, indent=2))

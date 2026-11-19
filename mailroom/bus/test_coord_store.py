@@ -371,5 +371,204 @@ class BoundaryAndDefaultsTest(unittest.TestCase):
             self.assertEqual(resp.status, 200)
 
 
+class TeamRosterTest(unittest.TestCase):
+    def setUp(self):
+        from datetime import datetime, timezone
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.store = make_store(self.root)
+        now_ts = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        agents = [
+            {
+                "id": "coordinator",
+                "name": "Coordinator",
+                "role_preset": "orchestrator",
+                "machine": "A",
+                "kind": "permanent",
+                "state": "waiting",
+                "summary": "Reviewing inbox",
+                "updated_at": "2020-01-01T00:00:00Z",
+                "session_id": "secret-session-coord",
+                "workdir": "/tmp/private-workdir",
+                "role_prompt": "Internal prompt text",
+            },
+            {
+                "id": "worker",
+                "name": "Worker",
+                "role": "Implementation worker",
+                "machine": "A",
+                "kind": "permanent",
+                "state": "working",
+                "summary": "Running checks",
+                "last_active": now_ts,
+                "updated_at": now_ts,
+            },
+            {
+                "id": "reviewer",
+                "name": "Reviewer",
+                "role_preset": "reviewer",
+                "machine": "A",
+                "kind": "permanent",
+                "state": "idle",
+                "summary": "Idle",
+                "updated_at": "2020-01-01T00:00:00Z",
+            },
+            {
+                "id": "offline_bot",
+                "name": "Offline Bot",
+                "role": "Backup runner",
+                "machine": "A",
+                "kind": "permanent",
+                "state": "offline",
+                "summary": "Shut down",
+                "updated_at": "2020-01-01T00:00:00Z",
+            },
+            {
+                "id": "old_agent",
+                "name": "Retired Agent",
+                "role": "Legacy",
+                "machine": "A",
+                "kind": "permanent",
+                "state": "offline",
+                "retired": True,
+            },
+            {
+                "id": "t1",
+                "name": "Temp One",
+                "role": "Ad-hoc",
+                "machine": "A",
+                "kind": "temporary",
+                "state": "expired",
+            },
+        ]
+        links = [
+            {"a": "coordinator", "b": "worker"},
+            {"a": "coordinator", "b": "reviewer"},
+            {"a": "coordinator", "b": "t1"},
+        ]
+        (self.store / "bus" / "agents.json").write_text(
+            json.dumps({"agents": agents, "links": links}),
+            encoding="utf-8",
+        )
+        home = self.root / "home"
+        home.mkdir()
+        self.env = {
+            "HOME": str(home),
+            "COORD_STORE": str(self.store),
+            "BUS_REPO_DIR": str(self.root),
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
+        # Record a recent inbox poll for coordinator so listening=True.
+        subprocess.run(
+            [sys.executable, str(BUS_DIR / "bus.py"), "inbox", "--agent", "coordinator"],
+            env=self.env,
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
+
+    def test_cli_api_and_client_team_roster(self):
+        cli_default = json.loads(
+            subprocess.check_output([sys.executable, str(BUS_DIR / "bus.py"), "team"], env=self.env, text=True)
+        )
+        by_id = {m["id"]: m for m in cli_default["members"]}
+        self.assertEqual(set(by_id), {"coordinator", "worker", "reviewer", "offline_bot"})
+        self.assertEqual(by_id["coordinator"]["availability"], "available")
+        self.assertTrue(by_id["coordinator"]["available"])
+        self.assertTrue(by_id["coordinator"]["reachable"])
+        self.assertTrue(by_id["coordinator"]["listening"])
+        self.assertEqual(by_id["coordinator"]["role"], "Orchestrator")
+        self.assertEqual(by_id["coordinator"]["peers"], ["reviewer", "worker"])
+        for sensitive in ("session_id", "workdir", "role_prompt", "watchers"):
+            self.assertNotIn(sensitive, by_id["coordinator"])
+
+        self.assertEqual(by_id["worker"]["availability"], "busy")
+        self.assertFalse(by_id["worker"]["available"])
+        self.assertTrue(by_id["worker"]["reachable"])
+        self.assertEqual(by_id["worker"]["role"], "Implementation worker")
+        self.assertEqual(by_id["worker"]["peers"], ["coordinator"])
+
+        self.assertEqual(by_id["reviewer"]["availability"], "away")
+        self.assertFalse(by_id["reviewer"]["available"])
+        self.assertFalse(by_id["reviewer"]["reachable"])
+
+        self.assertEqual(by_id["offline_bot"]["availability"], "offline")
+        self.assertFalse(by_id["offline_bot"]["available"])
+
+        cli_avail = json.loads(
+            subprocess.check_output(
+                [sys.executable, str(BUS_DIR / "bus.py"), "team", "--available"], env=self.env, text=True
+            )
+        )
+        self.assertEqual([m["id"] for m in cli_avail["members"]], ["coordinator"])
+
+        cli_all = json.loads(
+            subprocess.check_output([sys.executable, str(BUS_DIR / "bus.py"), "team", "--all"], env=self.env, text=True)
+        )
+        by_id_all = {m["id"]: m for m in cli_all["members"]}
+        self.assertEqual(by_id_all["old_agent"]["availability"], "retired")
+        self.assertTrue(by_id_all["old_agent"]["retired"])
+        self.assertEqual(by_id_all["t1"]["availability"], "ended")
+        self.assertTrue(by_id_all["t1"]["ended"])
+
+        # HTTP GET /api/team (on public agent port) + bus_client.py team, including under .ingress_closed.
+        (self.store / "bus" / ".ingress_closed").touch()
+        cli_gated = json.loads(
+            subprocess.check_output([sys.executable, str(BUS_DIR / "bus.py"), "team"], env=self.env, text=True)
+        )
+        self.assertEqual([m["id"] for m in cli_gated["members"]], [m["id"] for m in cli_default["members"]])
+
+        port = free_port()
+        proc = subprocess.Popen(
+            [sys.executable, str(BUS_DIR / "bus.py"), "serve", "--port", str(port), "--admin-port", "0"],
+            env=self.env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        self.addCleanup(proc.wait)
+        self.addCleanup(proc.terminate)
+        for _ in range(80):
+            try:
+                urlopen(f"http://127.0.0.1:{port}/api/team", timeout=1).read()
+                break
+            except URLError:
+                time.sleep(0.05)
+        else:
+            self.fail("bus server failed to start for /api/team test")
+
+        api_default = json.loads(urlopen(f"http://127.0.0.1:{port}/api/team", timeout=5).read())
+        self.assertEqual([m["id"] for m in api_default["members"]], ["coordinator", "worker", "reviewer", "offline_bot"])
+        self.assertEqual(api_default["links"], cli_default["links"])
+
+        api_avail = json.loads(urlopen(f"http://127.0.0.1:{port}/api/team?available=1", timeout=5).read())
+        self.assertEqual([m["id"] for m in api_avail["members"]], ["coordinator"])
+
+        api_all = json.loads(urlopen(f"http://127.0.0.1:{port}/api/team?all=1", timeout=5).read())
+        self.assertEqual(
+            {m["id"] for m in api_all["members"]},
+            {"coordinator", "worker", "reviewer", "offline_bot", "old_agent", "t1"},
+        )
+
+        client_env = {**self.env, "BUS_URL": f"http://127.0.0.1:{port}"}
+        client_default = json.loads(
+            subprocess.check_output([sys.executable, str(BUS_DIR / "bus_client.py"), "team"], env=client_env, text=True)
+        )
+        self.assertEqual(client_default["members"], api_default["members"])
+        self.assertEqual(client_default["links"], api_default["links"])
+        client_avail = json.loads(
+            subprocess.check_output(
+                [sys.executable, str(BUS_DIR / "bus_client.py"), "team", "--available"], env=client_env, text=True
+            )
+        )
+        self.assertEqual([m["id"] for m in client_avail["members"]], ["coordinator"])
+        client_all = json.loads(
+            subprocess.check_output(
+                [sys.executable, str(BUS_DIR / "bus_client.py"), "team", "--all"], env=client_env, text=True
+            )
+        )
+        self.assertEqual([m["id"] for m in client_all["members"]], [m["id"] for m in api_all["members"]])
+
+
 if __name__ == "__main__":
     unittest.main()

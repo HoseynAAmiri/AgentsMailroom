@@ -88,6 +88,9 @@ class StandaloneSmoke(unittest.TestCase):
                 for agent in ("coordinator", "worker"):
                     read(admin, "/api/agents", post={"id": agent, "name": agent})
                 read(admin, "/api/links", post={"links": [{"a": "coordinator", "b": "worker"}]})
+                roster = client("team")
+                self.assertEqual([m["id"] for m in roster["members"]], ["coordinator", "worker"])
+                self.assertEqual(roster["links"], [{"a": "coordinator", "b": "worker", "note": ""}])
                 msg = client("post", "--from", "coordinator", "--to", "worker",
                              "--task-id", "G1.1", "--body", "Please review the starter task.")
                 event_id = msg["id"]
