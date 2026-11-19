@@ -47,8 +47,8 @@ PERSONAL = [(n, re.compile(p.encode())) for n, p in [
 
 ALLOW = re.compile(
     r"^(README\.md|\.gitignore|\.size-allowlist|\.githooks/pre-(commit|push)|tools/[a-z_]+\.(py|sh)"
-    r"|review/attachments\.allow|exports/events/e\d{5}-e\d{5}\.jsonl|exports/todo/tasks\.safe\.json"
-    r"|mailroom/(cutover|rollback)\.sh|mailroom/bus/[a-z_]+\.py"
+    r"|docs/(GOALS|OPERATIONS)\.md|review/attachments\.allow|exports/events/e\d{5}-e\d{5}\.jsonl|exports/todo/tasks\.safe\.json"
+    r"|mailroom/(run|cutover|rollback)\.sh|mailroom/bus/[a-z_]+\.py"
     r"|mailroom/web/(src/.+\.(ts|tsx|css|mjs|json|svg|md)|[^/]+\.(json|ts|mjs|md)|\.gitignore|public/[^/]+\.svg))$")
 SCRATCH_BUILD = re.compile(r"^mailroom/(?:[^/]+/)*\.(?:[^/]+-build\.|tmp_)[^/]*/")
 SAFE_TASK_KEYS = {"goals", "tasks", "id", "number", "title", "removed", "goal_id", "position", "state",

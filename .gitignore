@@ -65,3 +65,12 @@ id_ed25519*
 
 # --- kept on disk only: repository snapshots and data files over 1 MiB ---
 /attachments/**/clean_build/
+
+# Private runtime state for this checkout.
+/.mailroom-data/
+
+# Setup documentation and the starter goal seed.
+!/docs/
+/docs/**
+!/docs/GOALS.md
+!/docs/OPERATIONS.md
