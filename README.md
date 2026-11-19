@@ -5,6 +5,11 @@ file attachments, and a goal tracker. Agents can check their inbox, search past
 messages, reply, and update tasks from a shell. The Team tab configures agent
 profiles, who can message whom, and temporary sessions.
 
+A typical setup uses one **Mailroom host** for the server, UI, and private
+data store. Agents can run on that host or on **worker machines** that connect
+over SSH. Each agent has a registered identity and uses the same HTTP CLI
+to read and send messages and to query goals, tasks, and priorities.
+
 ## Run from a clean checkout
 
 Use Linux with Bash, Python 3.11 or later, Node.js 24, and npm 11. Building the
@@ -29,6 +34,25 @@ the agent client. Both listeners default to loopback. Use
 `./mailroom/run.sh serve --port 18766 --admin-port 18768` to run alongside another
 installation. Use one server per data store.
 
+## Add machines and agents
+
+1. **Mailroom host.** Use port 8768 for the operator UI and port 8766 for agents.
+   For a persistent setup, [install the user service](docs/OPERATIONS.md#run-the-server-in-the-background).
+2. **Agents.** In **Team → Register agent**, choose an ID, role, machine, and
+   CLI, then configure **Who talks to whom**. Registering a permanent agent
+   creates its Mailroom profile. Start its CLI session on its assigned machine
+   and give it the **Connect** prompt from Team. Agents can also
+   [fetch their instructions from the server](docs/OPERATIONS.md#find-the-cli-commands).
+   Save the CLI's session ID if you want to resume that conversation later.
+3. **Worker machines.** [Set up an SSH tunnel and the HTTP client](docs/OPERATIONS.md#add-a-worker-machine).
+   A manual worker needs Python and its own chosen CLI. Add the worker to the
+   machine registry if you want remote health checks or temporary sessions.
+4. **Temporary agents.** Install and sign in to the chosen CLI where it will run.
+   **Team → Summon** takes a machine, CLI, optional model, time limit, and task
+   brief. See [agent lifecycle and watcher setup](docs/OPERATIONS.md#agent-sessions-and-wakeups)
+   for systemd, CLI discovery, and the difference between waiting and
+   automatically resuming a session.
+
 ### Send a first message
 
 1. In **Team**, add two permanent agents with IDs `coordinator` and `worker`.
@@ -45,12 +69,15 @@ python3 mailroom/bus/bus_client.py post --from coordinator --to worker \
 # Read the worker's unread messages. Use the returned event ID when replying.
 python3 mailroom/bus/bus_client.py inbox --agent worker
 
-# Report an explicit task update using the revision from todo show G1.1.
+# List goals and tasks. Each task includes its state, owner, priority, and revision.
+python3 mailroom/bus/bus_client.py todo list
+
+# Inspect a single task, including its next action and whether it needs a decision.
 python3 mailroom/bus/bus_client.py todo show G1.1
 ```
 
 See [agent and operator commands](docs/OPERATIONS.md) for replies, searches,
-attachments, task changes, and optional CLI integrations.
+attachments, [priority queries](docs/OPERATIONS.md#ask-the-cli-about-goals-tasks-and-priorities), and task updates.
 
 ## Where the data lives
 
