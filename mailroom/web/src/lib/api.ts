@@ -1,4 +1,4 @@
-import type { Agent, Attachment, BusEvent, Link, Ref, UserState } from "./types";
+import type { Agent, Attachment, BusEvent, Link, MailTaskIndex, Ref, UserState } from "./types";
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { cache: "no-store", ...init });
@@ -23,6 +23,7 @@ export interface OutgoingMessage {
 }
 
 export const api = {
+  mailTasks: () => call<MailTaskIndex>("/api/todo?mail=1"),
   goalChoices: () => call<{ tasks: { id: string; title: string }[] }>("/api/todo"),
   goalTag: (eventId: string) => call<{ override: boolean; task_id: string | null }>(`/api/todo?event_id=${encodeURIComponent(eventId)}`),
   linkGoalFile: (id: string, path: string) => post<{ export_warning?: string }>("/api/todo", { action: "link", id, path }),

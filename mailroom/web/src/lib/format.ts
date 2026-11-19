@@ -1,4 +1,4 @@
-import type { Agent, Presence } from "./types";
+import type { Agent, MailTask, Presence } from "./types";
 
 export function ageMin(ts?: string | null): number {
   if (!ts) return Infinity;
@@ -149,14 +149,16 @@ export const TYPE_STYLE: Record<string, { label: string; cls: string }> = {
   "agent.status": { label: "status", cls: "bg-muted text-muted-foreground" },
 };
 
-export const TASK_STATE_STYLE: Record<string, { label: string; cls: string }> = {
-  open: { label: "tagged", cls: "bg-muted text-muted-foreground" },
-  started: { label: "in progress", cls: TYPE_STYLE["task.started"].cls },
-  blocked: { label: "blocked", cls: TYPE_STYLE["task.blocked"].cls },
-  completed: { label: "done", cls: TYPE_STYLE["task.completed"].cls },
-  failed: { label: "failed", cls: TYPE_STYLE["task.failed"].cls },
-  waiting_human: { label: "needs you", cls: TYPE_STYLE["human.needed"].cls },
+export const GOAL_STATE_STYLE: Record<MailTask["state"], { label: string; cls: string }> = {
+  todo: { label: "To do", cls: "bg-muted text-muted-foreground" },
+  doing: { label: "In progress", cls: "bg-primary/10 text-primary" },
+  blocked: { label: "Blocked", cls: "bg-amber-500/15 text-amber-600 dark:text-amber-300" },
+  done: { label: "Done", cls: "border border-border bg-transparent text-muted-foreground" },
 };
+
+export function plainTaskTitle(title: string) {
+  return title.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/[`*]/g, "");
+}
 
 export type ConnLevel = "listening" | "watcher" | "backlog" | "quiet" | "offline" | "retired" | "ended";
 

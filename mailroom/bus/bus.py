@@ -170,6 +170,8 @@ def todo_read(params, *, admin: bool):
     store = todo_store()
     if not store.initialized():
         raise TodoError("Goal tracking has not been seeded", 503)
+    if params.get("mail") == "1":
+        return store.mail_index(include_tags=admin)
     if params.get("event_id") and admin:
         tags, _ = store.activity()
         key = params["event_id"]

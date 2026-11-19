@@ -78,7 +78,8 @@ export function FolderPane() {
     const unreadIn = (f: FolderId) =>
       threads.filter((t) => threadInFolder(t, f, ctx)).reduce((n, t) => n + t.events.filter(ms.isUnread).length, 0);
     const totalIn = (f: FolderId) => threads.filter((t) => threadInFolder(t, f, ctx)).length;
-    const attention = threads.filter((t) => ["blocked", "waiting_human", "failed"].includes(t.task?.state ?? "")).length;
+    const attention = threads.filter((t) => threadInFolder(t, "tasks", ctx)
+      && t.goalTask && (t.goalTask.state === "blocked" || (t.goalTask.state !== "done" && t.goalTask.decision))).length;
     return {
       inbox: unreadIn("inbox"),
       needs: openHumanIds.size,

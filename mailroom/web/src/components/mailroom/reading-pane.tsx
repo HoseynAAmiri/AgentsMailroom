@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Archive, ArchiveRestore, ArrowLeft, ChevronsUpDown, Flag, Forward, Mail, MailOpen, MoreHorizontal, Reply, ReplyAll, RotateCcw, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { visibleEvents } from "@/lib/threads";
-import { fullTime, listTime, TASK_STATE_STYLE, TYPE_STYLE } from "@/lib/format";
+import { eventTaskId, visibleEvents } from "@/lib/threads";
+import { fullTime, GOAL_STATE_STYLE, listTime, plainTaskTitle, TYPE_STYLE } from "@/lib/format";
 import type { BusEvent } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -41,7 +41,8 @@ function Recipients({ e }: { e: BusEvent }) {
 }
 
 function MessageCard({ e, expanded, onToggle, focused }: { e: BusEvent; expanded: boolean; onToggle: () => void; focused: boolean }) {
-  const { agents, ms, mark, startCompose, openHumanIds } = useMailroom();
+  const { agents, ms, mark, startCompose, openHumanIds, taskTags } = useMailroom();
+  const taskTag = eventTaskId(e, taskTags);
   const deleted = ms.isDeleted(e);
   const flagged = ms.isFlagged(e);
   const unread = ms.isUnread(e);
@@ -101,10 +102,10 @@ function MessageCard({ e, expanded, onToggle, focused }: { e: BusEvent; expanded
             <Button variant="ghost" size="sm" aria-label="Forward" onClick={() => startCompose("forward", e)}>
               <Forward /> <span className="hidden sm:inline">Forward</span>
             </Button>
-            <Tip label={`${e.ts}${e.task_id ? ` · ${e.task_id}` : ""}`} side="top" className="ml-auto min-w-0 truncate">
+            <Tip label={`${e.ts}${taskTag ? ` · ${taskTag}` : ""}`} side="top" className="ml-auto min-w-0 truncate">
               <span className="font-mono text-[11px] text-muted-foreground">
                 {e.id}
-                {e.task_id ? ` · ${e.task_id}` : ""}
+                {taskTag ? ` · ${taskTag}` : ""}
               </span>
             </Tip>
             <IconAction label={flagged ? "Clear flag" : "Flag"} icon={Flag} onClick={() => mark(flagged ? "unflag" : "flag", [e.id])} className={cn(flagged && "text-red-500")} />
@@ -155,7 +156,7 @@ function EmptyReading() {
 }
 
 export function ReadingPane() {
-  const { threads, selected, select, folder, ms, mark, compose, startCompose, focusEvent, agents, snap } = useMailroom();
+  const { threads, selected, select, folder, ms, mark, compose, startCompose, focusEvent, agents, snap, openGoalTask } = useMailroom();
   const thread = useMemo(() => threads.find((t) => t.key === selected) ?? null, [threads, selected]);
   const evs = useMemo(() => (thread ? visibleEvents(thread, folder, ms) : []), [thread, folder, ms]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -207,7 +208,8 @@ export function ReadingPane() {
   const flagged = evs.some(ms.isFlagged);
   const deletedView = folder === "deleted";
   const archived = evs.every(ms.isArchived);
-  const taskStyle = thread.task ? TASK_STATE_STYLE[thread.task.state] : null;
+  const goalTask = thread.goalTask;
+  const taskStyle = goalTask ? GOAL_STATE_STYLE[goalTask.state] : null;
   const focusIndex = focusEvent ? evs.findIndex((e) => e.id === focusEvent) : -1;
   const initialStart = focusIndex >= 0 && focusIndex < evs.length - 6 ? Math.max(0, focusIndex - 3) : Math.max(0, evs.length - 6);
   const start = Math.max(0, initialStart - olderPages * 30);
@@ -260,9 +262,12 @@ export function ReadingPane() {
           <div>
             <h1 className="text-lg leading-tight font-semibold break-words sm:text-xl">{thread.subject}</h1>
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              {thread.taskId && <Pill className="bg-muted font-mono text-muted-foreground">{thread.taskId}</Pill>}
-              {taskStyle && <Pill className={taskStyle.cls}>{taskStyle.label}</Pill>}
-              {thread.task?.parent_task_id && <Pill className="bg-muted text-muted-foreground">↳ {thread.task.parent_task_id}</Pill>}
+              {goalTask ? (
+                <Button variant="outline" size="xs" onClick={() => openGoalTask(goalTask.id)} title={plainTaskTitle(goalTask.title)}>
+                  Open {goalTask.id} in Goals
+                </Button>
+              ) : thread.taskId && <Pill className="bg-muted font-mono text-muted-foreground">{thread.taskId} · Unlinked</Pill>}
+              {taskStyle && <Pill className={taskStyle.cls}>{goalTask?.decision ? "USER decision" : taskStyle.label}</Pill>}
               <span className="text-xs text-muted-foreground">
                 {evs.length} message{evs.length === 1 ? "" : "s"} ·
               </span>

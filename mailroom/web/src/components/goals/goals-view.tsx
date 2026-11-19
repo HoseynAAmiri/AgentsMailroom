@@ -18,6 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { GoalSelect, type GoalOption } from "./goal-select";
 import { useBackLayer } from "@/hooks/use-back-layer";
 import { api, fileHref } from "@/lib/api";
+import { GOAL_STATE_STYLE, plainTaskTitle } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useMailroom } from "@/components/mailroom/context";
 
@@ -43,32 +44,21 @@ interface Evidence {
   file_total: number;
 }
 type Edit = { kind: "goal" | "task"; id?: string; revision?: number; fields: Record<string, string | boolean> };
-const stateLabel: Record<State, string> = { todo: "To do", doing: "In progress", blocked: "Blocked", done: "Done" };
-const stateColor: Record<State, string> = {
-  todo: "bg-muted text-muted-foreground",
-  doing: "bg-primary/10 text-primary",
-  blocked: "bg-amber-500/15 text-amber-600 dark:text-amber-300",
-  done: "border-border bg-transparent text-muted-foreground",
-};
 const textClass = "text-sm text-muted-foreground";
 const pageSize = 30;
-const stateOptions = Object.entries(stateLabel).map(([value, label]) => ({ value, label }));
+const stateOptions = Object.entries(GOAL_STATE_STYLE).map(([value, { label }]) => ({ value, label }));
 const priorities = ["high", "normal", "low"].map((value) => ({ value, label: value[0].toUpperCase() + value.slice(1) }));
 
-function plainTitle(title: string) {
-  return title.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/[`*]/g, "");
-}
-
 function titleParts(title: string) {
-  const plain = plainTitle(title);
+  const plain = plainTaskTitle(title);
   const end = plain.search(/[.!?]\s+(?=[A-Z])/);
   return end < 0 ? { heading: plain, rest: "" } : { heading: plain.slice(0, end + 1), rest: plain.slice(end + 1).trim() };
 }
 
 function StateBadge({ task }: { task: Task }) {
-  return <Badge variant="secondary" className={stateColor[task.state]}>
+  return <Badge variant="secondary" className={GOAL_STATE_STYLE[task.state].cls}>
     {task.state === "done" && <CircleCheck data-icon="inline-start" aria-hidden="true" />}
-    {task.decision ? "USER decision" : stateLabel[task.state]}
+    {task.decision ? "USER decision" : GOAL_STATE_STYLE[task.state].label}
   </Badge>;
 }
 
@@ -83,7 +73,7 @@ async function request<T>(url: string, body?: unknown): Promise<T> {
 }
 
 export function GoalsView() {
-  const { snap, agents, search, openEvent, openFile, startCompose, registerViewRefresh } = useMailroom();
+  const { snap, agents, search, openEvent, openFile, startCompose, registerViewRefresh, goalTaskId: selected, setGoalTaskId: setSelected } = useMailroom();
   const admin = !!snap?.capabilities?.admin;
   const [data, setData] = useState<Tracker>();
   const [error, setError] = useState("");
@@ -95,7 +85,6 @@ export function GoalsView() {
   const [showAll, setShowAll] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<{ filter: string; ids: string[] }>();
-  const [selected, setSelected] = useState("");
   const [evidence, setEvidence] = useState<Evidence>();
   const [detailError, setDetailError] = useState("");
   const [detailRefresh, setDetailRefresh] = useState(0);
@@ -167,7 +156,7 @@ export function GoalsView() {
   }) ?? [], [data, goalFilter, stateFilter, ownerFilter, priorityFilter, search, decisionsOnly]);
   const people = useMemo(() => [...new Set(["user", ...agents.keys(), ...(data?.tasks.map((row) => row.owner).filter(Boolean) ?? [])])],
     [agents, data?.tasks]);
-  const goalOptions = useMemo(() => data?.goals.map((row) => ({ value: row.id, label: `${row.id} · ${plainTitle(row.title)}` })) ?? [], [data?.goals]);
+  const goalOptions = useMemo(() => data?.goals.map((row) => ({ value: row.id, label: `${row.id} · ${plainTaskTitle(row.title)}` })) ?? [], [data?.goals]);
   const taskOptions = useMemo(() => data?.tasks.map((row) => ({ value: row.id, label: `${row.id} · ${titleParts(row.title).heading}` })) ?? [], [data?.tasks]);
   const personOptions = people.map((value) => ({ value, label: value === "user" ? "USER" : value }));
 
@@ -317,13 +306,13 @@ export function GoalsView() {
                         <Badge variant="outline" className="font-mono text-muted-foreground">{group.id}</Badge>
                         <ChevronRight className="size-4 text-muted-foreground" aria-hidden="true" />
                       </div>
-                      <CardTitle className="text-balance">{plainTitle(group.title)}</CardTitle>
+                      <CardTitle className="text-balance">{plainTaskTitle(group.title)}</CardTitle>
                     </CardHeader>
                     <CardContent className="mt-auto space-y-2">
                       <Progress value={items.length ? 100 * done / items.length : 0} aria-label={`${done} of ${items.length} tasks done`} />
                       <CardDescription className="flex items-center justify-between gap-2 tabular-nums">
                         <span>{done} of {items.length} done</span>
-                        {!!blocked && <Badge variant="secondary" className={stateColor.blocked}>{blocked} blocked</Badge>}
+                        {!!blocked && <Badge variant="secondary" className={GOAL_STATE_STYLE.blocked.cls}>{blocked} blocked</Badge>}
                       </CardDescription>
                     </CardContent>
                   </Card>;
@@ -337,7 +326,7 @@ export function GoalsView() {
                     <div className="flex items-center gap-1">
                       <AccordionTrigger>
                         <Badge variant="outline" className="font-mono">{group.id}</Badge>
-                        <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{plainTitle(group.title)}</span>
+                        <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{plainTaskTitle(group.title)}</span>
                         <Badge variant="secondary" aria-label={`${items.length} tasks`}>{items.length}</Badge>
                       </AccordionTrigger>
                       {admin && openGroups.includes(group.id) && (

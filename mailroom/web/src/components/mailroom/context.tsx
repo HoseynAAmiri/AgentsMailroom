@@ -1,12 +1,13 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { api, type OutgoingMessage } from "@/lib/api";
 import { useBus, useLocalStorage } from "@/hooks/use-bus";
 import { pushBack, useBackLayer, useHistoryRoot } from "@/hooks/use-back-layer";
 import {
   buildThreads,
+  eventTaskId,
   mailState,
   openHumanRequests,
   snippet,
@@ -14,7 +15,7 @@ import {
   type MailState,
   type Thread,
 } from "@/lib/threads";
-import type { Agent, BusEvent, Snapshot } from "@/lib/types";
+import type { Agent, BusEvent, MailTaskIndex, Snapshot } from "@/lib/types";
 import { displayName } from "@/lib/format";
 
 export type View = "goals" | "mail" | "team" | "machine" | "files";
@@ -56,9 +57,13 @@ interface Ctx {
   select: (key: string | null, opts?: { markRead?: boolean }) => void;
   focusEvent: string | null;
   openEvent: (id: string) => void;
+  goalTaskId: string;
+  setGoalTaskId: (id: string) => void;
+  openGoalTask: (id: string) => void;
   search: string;
   setSearch: (s: string) => void;
   taskFilter: string;
+  taskTags?: MailTaskIndex["tags"];
   setTaskFilter: (s: string) => void;
   compose: ComposeDraft | null;
   savedDraft: ComposeDraft | null;
@@ -116,6 +121,25 @@ const MAILBOX_FEEDBACK = {
 export function MailroomProvider({ children }: { children: ReactNode }) {
   const { snap, events, connected, error, refresh, setUserState } = useBus();
   const [view, setViewRaw] = useLocalStorage<View>("mr-view", "mail");
+  const [mailTasks, setMailTasks] = useState<MailTaskIndex>();
+  const refreshMailTasks = useCallback(async () => {
+    try {
+      const index = await api.mailTasks();
+      if (Array.isArray(index.tasks) && index.tags) {
+        setMailTasks((current) => !current || index.revision > current.revision ? index : current);
+      }
+    } catch {
+      // The mailbox remains usable while the tracker is unavailable.
+    }
+  }, []);
+  useEffect(() => {
+    if (view !== "mail") return;
+    void refreshMailTasks();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refreshMailTasks();
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, [view, refreshMailTasks]);
   const [avatarColors, setAvatarColors] = useLocalStorage<Record<string, string>>("mr-avatar-colors", {});
   const setAvatarColor = (agentId: string, colorId: string | null) => {
     setAvatarColors((current) => {
@@ -133,13 +157,14 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
     };
   }, []);
   const refreshActiveView = useCallback(async () => {
-    await Promise.all([refresh(), viewRefresh.current[view]?.()]);
-  }, [refresh, view]);
+    await Promise.all([refresh(), viewRefresh.current[view]?.(), view === "mail" && refreshMailTasks()]);
+  }, [refresh, refreshMailTasks, view]);
   const [folder, setFolderRaw] = useLocalStorage<FolderId>("mr-folder", "all");
   const [selected, setSelected] = useState<string | null>(null);
   const [focusEvent, setFocusEvent] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [taskFilter, setTaskFilter] = useLocalStorage("mr-task-filter", "attention");
+  const [taskFilter, setTaskFilter] = useLocalStorage("mr-tracker-task-filter", "all");
+  const [goalTaskId, setGoalTaskId] = useState("");
   const [draft, setCompose] = useLocalStorage<ComposeDraft | null>("mr-draft", null);
   const [draftClosed, setDraftClosed] = useLocalStorage("mr-draft-closed", false);
   const compose = draftClosed ? null : draft;
@@ -162,10 +187,14 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
 
   /** Open a file, or pass null to close the viewer (Phone Back also closes it). */
   const openFile = useCallback((f: ViewedFile | null) => setViewing(f), []);
+  const openGoalTask = useCallback((id: string) => {
+    setGoalTaskId(id);
+    setView("goals");
+  }, [setView]);
 
   const agents = useMemo(() => new Map((snap?.agents ?? []).map((a) => [a.id, a])), [snap?.agents]);
   const ms = useMemo(() => mailState(snap?.user_state), [snap?.user_state]);
-  const threads = useMemo(() => buildThreads(events, snap?.tasks ?? []), [events, snap?.tasks]);
+  const threads = useMemo(() => buildThreads(events, snap?.tasks ?? [], mailTasks), [events, snap?.tasks, mailTasks]);
   const threadByEvent = useMemo(() => {
     const m = new Map<string, Thread>();
     for (const t of threads) for (const e of t.events) m.set(e.id, t);
@@ -262,10 +291,11 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
       }
       const t = threadByEvent.get(source.id);
       const subject = source.subject || t?.subject || source.task_id || "";
+      const sourceTaskId = eventTaskId(source, mailTasks?.tags) ?? "";
       if (snap?.capabilities?.admin && preset?.taskId === undefined) {
         void api.goalTag(source.id).then((tag) => {
           if (!tag.override) return;
-          setCompose((current) => current?.inReplyTo === source.id && current.taskId === (source.task_id ?? "")
+          setCompose((current) => current?.inReplyTo === source.id && current.taskId === sourceTaskId
             ? { ...current, taskId: tag.task_id ?? "" } : current);
         }).catch(() => {});
       }
@@ -276,7 +306,7 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
           mode,
           to: "",
           subject: subject ? `Fwd: ${subject.replace(/^Fwd:\s*/i, "")}` : "",
-          taskId: source.task_id ?? "",
+          taskId: sourceTaskId,
           inReplyTo: source.id,
           body: `\n\n${header}`,
           threadKey: t?.key ?? null,
@@ -296,7 +326,7 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
         to: other,
         cc: [...new Set(cc)],
         subject,
-        taskId: source.task_id ?? "",
+        taskId: sourceTaskId,
         inReplyTo: source.id,
         body: "",
         threadKey: t?.key ?? null,
@@ -304,7 +334,7 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
         ...preset,
       });
     },
-    [threadByEvent, agents, draft, resumeDraft, setCompose, setView, snap?.capabilities?.admin],
+    [threadByEvent, agents, draft, mailTasks, resumeDraft, setCompose, setView, snap?.capabilities?.admin],
   );
 
   const updateCompose = useCallback(
@@ -352,7 +382,7 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
       toast.success(`Sent ${ev.id} to ${[ev.to, ...(ev.cc ?? [])].join(", ")}`, { description: snippet(ev.body, 90) });
       setCompose(null);
       await refresh();
-      const t = buildThreads([...events, ev], snap?.tasks ?? []).find((x) => x.events.some((e) => e.id === ev.id));
+      const t = buildThreads([...events, ev], snap?.tasks ?? [], mailTasks).find((x) => x.events.some((e) => e.id === ev.id));
       if (t) {
         setSelected(t.key);
         setFocusEvent(ev.id);
@@ -364,7 +394,7 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
     } finally {
       setSending(false);
     }
-  }, [compose, refresh, setCompose, events, snap?.tasks]);
+  }, [compose, refresh, setCompose, events, snap?.tasks, mailTasks]);
 
   const value: Ctx = {
     snap,
@@ -390,9 +420,13 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
     select,
     focusEvent,
     openEvent,
+    goalTaskId,
+    setGoalTaskId,
+    openGoalTask,
     search,
     setSearch,
     taskFilter,
+    taskTags: mailTasks?.tags,
     setTaskFilter,
     compose,
     savedDraft,

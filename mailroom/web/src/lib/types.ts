@@ -28,6 +28,19 @@ export interface BusEvent {
   state?: string;
 }
 
+export interface MailTask {
+  id: string;
+  title: string;
+  state: "todo" | "doing" | "blocked" | "done";
+  decision: number;
+}
+
+export interface MailTaskIndex {
+  revision: number;
+  tasks: MailTask[];
+  tags: Record<string, string | null>;
+}
+
 export type AgentKind = "permanent" | "temporary" | "subagent";
 
 export interface Agent {

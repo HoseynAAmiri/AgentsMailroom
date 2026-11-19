@@ -146,6 +146,19 @@ class TodoStore:
                     "order_revision": meta["order_revision"], "cutover": meta["cutover"],
                     "cutover_time": meta["cutover_time"], "updated": meta["updated"]}
 
+    def mail_index(self, *, include_tags: bool):
+        with closing(self.connect()) as conn:
+            conn.execute("BEGIN")
+            meta = conn.execute("SELECT revision FROM metadata WHERE singleton=1").fetchone()
+            if not meta:
+                raise TodoError("Goal tracking has not been seeded", 503)
+            tasks = [dict(row) for row in conn.execute(
+                """SELECT tasks.id, tasks.title, tasks.state, tasks.decision
+                   FROM tasks JOIN goals ON goals.id=tasks.goal_id
+                   WHERE tasks.removed=0 AND goals.removed=0 ORDER BY goals.number, tasks.position""")]
+            tags = dict(conn.execute("SELECT event_id,task_id FROM tags")) if include_tags else {}
+            return {"revision": meta["revision"], "tasks": tasks, "tags": tags}
+
     def activity(self, task_id: str | None = None):
         with closing(self.connect()) as conn:
             tags = dict(conn.execute("SELECT event_id,task_id FROM tags"))

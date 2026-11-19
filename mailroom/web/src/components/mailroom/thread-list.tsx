@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Archive, CheckCheck, Flag, Mail, MailOpen, Menu, Paperclip, RotateCcw, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { lastTs, TASK_FILTERS, threadInFolder, threadMatches, visibleEvents, snippet, type Thread } from "@/lib/threads";
-import { listTime, TASK_STATE_STYLE } from "@/lib/format";
+import { GOAL_STATE_STYLE, listTime, plainTaskTitle } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -68,7 +68,9 @@ function ThreadRow({ t }: { t: Thread }) {
   const hasFiles = evs.some((e) => (e.refs ?? []).some((r) => r.kind === "file"));
   const sel = selected === t.key;
   const ids = evs.map((e) => e.id);
-  const taskStyle = t.task ? TASK_STATE_STYLE[t.task.state] : null;
+  const taskStyle = t.goalTask ? GOAL_STATE_STYLE[t.goalTask.state] : null;
+  const taskTitle = t.goalTask ? plainTaskTitle(t.goalTask.title) : t.subject;
+  const title = folder === "tasks" && t.taskId && taskTitle !== t.taskId ? `${t.taskId} · ${taskTitle}` : t.subject;
   const deletedView = folder === "deleted";
   const participants = participantsLine(t, evs);
 
@@ -96,12 +98,13 @@ function ThreadRow({ t }: { t: Thread }) {
         </div>
         <div className="mt-1 flex items-center gap-1.5">
           {needs && <AlertTriangle className="size-3.5 shrink-0 text-amber-500" />}
-          <span className={cn("min-w-0 truncate text-sm", unread ? "font-semibold text-primary" : "text-foreground")}>{t.subject}</span>
+          <span className={cn("min-w-0 truncate text-sm", unread ? "font-semibold text-primary" : "text-foreground")} title={title}>{title}</span>
           {evs.length > 1 && <span className="shrink-0 text-xs text-muted-foreground">({evs.length})</span>}
           <span className="ml-auto flex shrink-0 items-center gap-1">
             {hasFiles && <Paperclip className="size-3.5 text-muted-foreground" />}
             {flagged && <Flag className="size-3.5 fill-red-500 text-red-500" />}
-            {taskStyle && <Pill className={taskStyle.cls}>{taskStyle.label}</Pill>}
+            {taskStyle && <Pill className={taskStyle.cls}>{t.goalTask?.decision ? "USER decision" : taskStyle.label}</Pill>}
+            {folder === "tasks" && !t.goalTask && <Pill className="bg-muted text-muted-foreground">Unlinked</Pill>}
           </span>
         </div>
         <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{snippet(last.body, 220)}</p>
@@ -154,7 +157,7 @@ function ArchiveOlder() {
   const [days, setDays] = useState(30);
   const cutoff = Date.now() - days * 86_400_000;
   const candidates = open ? threads.flatMap((thread) => {
-    if (thread.taskId && thread.task?.state !== "completed") return [];
+    if (thread.goalTask ? thread.goalTask.state !== "done" : thread.taskId && thread.task?.state !== "completed") return [];
     const live = visibleEvents(thread, "all", ms);
     const latest = live.at(-1);
     if (!latest || !(Date.parse(latest.ts) < cutoff) || live.every(ms.isArchived)) return [];
@@ -281,6 +284,7 @@ export function ThreadList() {
               key={f.key}
               type="button"
               onClick={() => setTaskFilter(f.key)}
+              aria-pressed={taskFilter === f.key}
               className={cn(
                 "rounded-full border px-2.5 py-0.5 text-xs",
                 taskFilter === f.key ? "tool-active border-transparent" : "hover:bg-muted",
@@ -289,13 +293,14 @@ export function ThreadList() {
               {f.label}
             </button>
           ))}
+          <p className="mt-1 w-full text-xs text-muted-foreground">Tagged conversations. Linked tasks use the status in Goals.</p>
         </div>
       )}
       <ScrollArea className="min-h-0 flex-1" ref={scrollRef}>
         {shown.length === 0 ? (
           <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-sm text-muted-foreground">
             <MailOpen className="size-10 opacity-40" />
-            {folder === "inbox" ? "All caught up." : "Nothing here."}
+            {folder === "inbox" ? "All caught up." : folder === "tasks" ? "No task conversations match this filter." : "Nothing here."}
           </div>
         ) : (
           shown.map((t) => <ThreadRow key={t.key} t={t} />)

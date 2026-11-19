@@ -1,4 +1,4 @@
-import type { Agent, BusEvent, Task, UserState } from "./types";
+import type { Agent, BusEvent, MailTask, MailTaskIndex, Task, UserState } from "./types";
 
 export function idNum(id: string | null | undefined): number {
   const m = String(id ?? "").match(/^e(\d+)$/);
@@ -12,6 +12,7 @@ export interface Thread {
   events: BusEvent[]; // chronological, includes deleted ones
   participants: string[];
   task: Task | null;
+  goalTask: MailTask | null;
 }
 
 export interface MailState {
@@ -41,27 +42,34 @@ export function snippet(s: string | null | undefined, n: number): string {
   return flat.length > n ? flat.slice(0, n - 1) + "…" : flat;
 }
 
-export function buildThreads(events: BusEvent[], tasks: Task[]): Thread[] {
+export function eventTaskId(event: BusEvent, tags?: MailTaskIndex["tags"]) {
+  return tags && Object.hasOwn(tags, event.id) ? tags[event.id] : event.task_id ?? null;
+}
+
+export function buildThreads(events: BusEvent[], tasks: Task[], index?: MailTaskIndex): Thread[] {
   const byId = new Map(events.map((e) => [e.id, e]));
   const keyOf = new Map<string, string>();
   const resolve = (e: BusEvent, depth = 0): string => {
     const known = keyOf.get(e.id);
     if (known) return known;
     let k: string;
-    if (e.task_id) k = `task:${e.task_id}`;
+    const taskId = eventTaskId(e, index?.tags);
+    if (taskId) k = `task:${taskId}`;
+    else if (index?.tags && Object.hasOwn(index.tags, e.id)) k = `ev:${e.id}`;
     else if (e.in_reply_to && byId.has(e.in_reply_to) && depth < 50) k = resolve(byId.get(e.in_reply_to)!, depth + 1);
     else k = `ev:${e.id}`;
     keyOf.set(e.id, k);
     return k;
   };
   const taskMap = new Map(tasks.map((t) => [t.task_id, t]));
+  const goalTaskMap = new Map(index?.tasks.map((task) => [task.id, task]));
   const threads = new Map<string, Thread>();
   for (const e of events) {
     if (e.type === "agent.status") continue;
     const k = resolve(e);
     let t = threads.get(k);
     if (!t) {
-      t = { key: k, subject: "", taskId: e.task_id ?? null, events: [], participants: [], task: null };
+      t = { key: k, subject: "", taskId: k.startsWith("task:") ? k.slice(5) : null, events: [], participants: [], task: null, goalTask: null };
       threads.set(k, t);
     }
     t.events.push(e);
@@ -75,6 +83,7 @@ export function buildThreads(events: BusEvent[], tasks: Task[]): Thread[] {
     }
     t.participants = [...ppl];
     t.task = t.taskId ? taskMap.get(t.taskId) ?? null : null;
+    t.goalTask = t.taskId ? goalTaskMap.get(t.taskId) ?? null : null;
     const withSubject = t.events.find((e) => e.subject);
     t.subject = withSubject?.subject || t.taskId || snippet(t.events[0]?.body, 80) || "(no subject)";
   }
@@ -162,15 +171,17 @@ export function lastTs(t: Thread, folder: FolderId, ms: MailState): string {
 export function threadMatches(t: Thread, q: string, agents: Map<string, Agent>): boolean {
   if (!q) return true;
   const needle = q.toLowerCase();
-  if (t.subject.toLowerCase().includes(needle) || (t.taskId ?? "").toLowerCase().includes(needle)) return true;
+  if (t.subject.toLowerCase().includes(needle) || t.goalTask?.title.toLowerCase().includes(needle) || (t.taskId ?? "").toLowerCase().includes(needle)) return true;
   if (t.participants.some((p) => p.toLowerCase() === needle || (agents.get(p)?.name ?? "").toLowerCase().includes(needle))) return true;
   return t.events.some((e) => e.id === needle || e.body.toLowerCase().includes(needle));
 }
 
 export const TASK_FILTERS: { key: string; label: string; match: (t: Thread) => boolean }[] = [
-  { key: "attention", label: "Needs attention", match: (t) => ["blocked", "waiting_human", "failed"].includes(t.task?.state ?? "") },
-  { key: "started", label: "In progress", match: (t) => t.task?.state === "started" },
-  { key: "open", label: "Tagged open", match: (t) => t.task?.state === "open" },
-  { key: "completed", label: "Done", match: (t) => t.task?.state === "completed" },
   { key: "all", label: "All", match: () => true },
+  { key: "todo", label: "To do", match: (t) => t.goalTask?.state === "todo" },
+  { key: "doing", label: "In progress", match: (t) => t.goalTask?.state === "doing" },
+  { key: "blocked", label: "Blocked", match: (t) => t.goalTask?.state === "blocked" },
+  { key: "done", label: "Done", match: (t) => t.goalTask?.state === "done" },
+  { key: "decisions", label: "USER decisions", match: (t) => !!t.goalTask?.decision },
+  { key: "unlinked", label: "Unlinked tags", match: (t) => !t.goalTask },
 ];
