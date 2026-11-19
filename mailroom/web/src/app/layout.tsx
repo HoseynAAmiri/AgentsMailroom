@@ -23,9 +23,6 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "Command Center · Mailroom",
   description: "Agent coordination bus: conversations, team and temporary agents",
-  icons: {
-    icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23080c11'/%3E%3Cpath d='M7 11l9 6 9-6' fill='none' stroke='%2378a9d8' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3Crect x='7' y='9' width='18' height='14' rx='2' fill='none' stroke='%2378a9d8' stroke-width='2.2'/%3E%3C/svg%3E",
-  },
 };
 
 export const viewport: Viewport = {
