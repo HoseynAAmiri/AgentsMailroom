@@ -132,7 +132,7 @@ class TodoStore:
                     )
         return {"seeded": created, **self.try_export()}
 
-    def listing(self):
+    def listing(self, *, include_links: bool = False):
         with closing(self.connect()) as conn:
             conn.execute("BEGIN")
             meta = conn.execute("SELECT * FROM metadata WHERE singleton=1").fetchone()
@@ -142,11 +142,12 @@ class TodoStore:
             tasks = [dict(row) for row in conn.execute(
                 """SELECT tasks.* FROM tasks JOIN goals ON goals.id=tasks.goal_id
                    WHERE tasks.removed=0 AND goals.removed=0 ORDER BY goals.number, tasks.position""")]
-            links_by_task: dict[str, list[str]] = {}
-            for row in conn.execute("SELECT task_id, path FROM links ORDER BY task_id, path"):
-                links_by_task.setdefault(row["task_id"], []).append(row["path"])
-            for task in tasks:
-                task["links"] = links_by_task.get(task["id"], [])
+            if include_links:
+                links_by_task: dict[str, list[str]] = {}
+                for row in conn.execute("SELECT task_id, path FROM links ORDER BY task_id, path"):
+                    links_by_task.setdefault(row["task_id"], []).append(row["path"])
+                for task in tasks:
+                    task["links"] = links_by_task.get(task["id"], [])
             return {"goals": goals, "tasks": tasks, "revision": meta["revision"],
                     "order_revision": meta["order_revision"], "cutover": meta["cutover"],
                     "cutover_time": meta["cutover_time"], "updated": meta["updated"]}

@@ -1,9 +1,19 @@
 "use client";
 
-import { CircleCheck, FileText, FolderOpen } from "lucide-react";
+import { Fragment } from "react";
+import { ChevronDown, CircleCheck, FileText, FolderOpen, TriangleAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { fileHref } from "@/lib/api";
 import {
   GOAL_STATE_STYLE,
@@ -45,11 +55,25 @@ export function titleParts(title: string) {
     : { heading: plain.slice(0, end + 1), rest: plain.slice(end + 1).trim() };
 }
 
-export function StateBadge({ task }: { task: Pick<GoalTask, "state" | "decision"> }) {
+export function StateBadge({ task }: { task: Pick<GoalTask, "state"> }) {
   return (
-    <Badge variant="secondary" className={GOAL_STATE_STYLE[task.state].cls}>
+    <Badge variant="secondary" data-task-state={task.state} className={GOAL_STATE_STYLE[task.state].cls}>
       {task.state === "done" && <CircleCheck data-icon="inline-start" aria-hidden="true" />}
-      {task.decision ? "USER decision" : GOAL_STATE_STYLE[task.state].label}
+      {GOAL_STATE_STYLE[task.state].label}
+    </Badge>
+  );
+}
+
+export function DecisionBadge({ decision }: { decision?: number | boolean }) {
+  if (!decision) return null;
+  return (
+    <Badge
+      variant="outline"
+      data-user-decision="true"
+      className="border-amber-500/50 bg-amber-500/15 text-amber-800 dark:text-amber-300"
+    >
+      <TriangleAlert data-icon="inline-start" aria-hidden="true" />
+      USER decision
     </Badge>
   );
 }
@@ -115,7 +139,7 @@ function BoardCard({ task, parsed, selectedId, onSelect, onOpenFile }: BoardCard
       ? `Blocker: ${task.blocker.trim()}`
       : parsed.text;
   const isBlockerSummary = task.state === "blocked" && !!task.blocker.trim();
-  const docLinks = extractTaskDocLinks(task.links);
+  const docLinks = extractTaskDocLinks(task.links, task.id);
 
   function renderDocButton(label: string, filePath: string | null) {
     if (!filePath) return null;
@@ -143,10 +167,58 @@ function BoardCard({ task, parsed, selectedId, onSelect, onOpenFile }: BoardCard
     renderDocButton("PDF", docLinks.pdf),
   ].filter(Boolean);
 
-  const fallbackOther =
-    !quickButtons.length ? docLinks.other.slice(0, 2).map((p) => renderDocButton(p.split("/").at(-1) || p, p)).filter(Boolean) : [];
-  const extraCount = docLinks.other.length - (!quickButtons.length ? Math.min(2, docLinks.other.length) : 0);
-  const hasFooter = !!docLinks.folderLabel || quickButtons.length > 0 || fallbackOther.length > 0 || extraCount > 0;
+  const shownPaths = new Set<string>(
+    [docLinks.context, docLinks.dossier, docLinks.pdf].filter((p): p is string => !!p && !!fileHref(p)),
+  );
+
+  const fallbackPaths = !quickButtons.length
+    ? docLinks.other.filter((p) => !!fileHref(p)).slice(0, 2)
+    : [];
+  const fallbackOther = fallbackPaths
+    .map((p) => renderDocButton(p.split("/").at(-1) || p, p))
+    .filter(Boolean);
+  for (const p of fallbackPaths) {
+    shownPaths.add(p);
+  }
+
+  interface ViewableDocEntry {
+    path: string;
+    href: string;
+    label: string;
+  }
+
+  const makeEntry = (path: string | null, role?: string): ViewableDocEntry | null => {
+    if (!path || shownPaths.has(path)) return null;
+    const href = fileHref(path);
+    if (!href) return null;
+    const base = path.split("/").at(-1) || path;
+    return { path, href, label: role ? `${role} · ${base}` : base };
+  };
+
+  const secondaryGroups: { folder: string; label: string; entries: ViewableDocEntry[] }[] = [];
+  const groupedPaths = new Set<string>();
+  for (const folderDoc of docLinks.folders.slice(1)) {
+    const entries = [
+      makeEntry(folderDoc.context, "Context"),
+      makeEntry(folderDoc.dossier, "Dossier"),
+      makeEntry(folderDoc.pdf, "PDF"),
+      ...folderDoc.extra.map((p) => makeEntry(p)),
+    ].filter((e): e is ViewableDocEntry => e !== null);
+    if (entries.length > 0) {
+      for (const e of entries) groupedPaths.add(e.path);
+      secondaryGroups.push({ folder: folderDoc.folder, label: folderDoc.label, entries });
+    }
+  }
+
+  const standaloneEntries = docLinks.other
+    .filter((p) => !shownPaths.has(p) && !groupedPaths.has(p))
+    .map((p) => makeEntry(p))
+    .filter((e): e is ViewableDocEntry => e !== null);
+
+  const extraDocsCount =
+    secondaryGroups.reduce((sum, g) => sum + g.entries.length, 0) + standaloneEntries.length;
+  const hasFooter =
+    !!docLinks.folderLabel || quickButtons.length > 0 || fallbackOther.length > 0 || extraDocsCount > 0;
 
   return (
     <Card
@@ -170,6 +242,7 @@ function BoardCard({ task, parsed, selectedId, onSelect, onOpenFile }: BoardCard
             {task.id}
           </Badge>
           <StateBadge task={task} />
+          <DecisionBadge decision={task.decision} />
           {!parsed.stage && <StageBadge stage={null} parsed={parsed} />}
           <Badge variant="outline" className="text-[11px]">
             {task.owner === "user" ? "USER" : task.owner || "Unassigned"}
@@ -210,17 +283,67 @@ function BoardCard({ task, parsed, selectedId, onSelect, onOpenFile }: BoardCard
               <span className="truncate">{docLinks.folderLabel}</span>
             </span>
           )}
-          {(quickButtons.length > 0 || fallbackOther.length > 0 || extraCount > 0) && (
+          {(quickButtons.length > 0 || fallbackOther.length > 0 || extraDocsCount > 0) && (
             <div className="flex flex-wrap items-center gap-1">
               {quickButtons}
               {fallbackOther}
-              {extraCount > 0 && (
-                <span
-                  title={docLinks.other.join("\n")}
-                  className="px-1 text-[11px] text-muted-foreground tabular-nums"
-                >
-                  +{extraCount}
-                </span>
+              {extraDocsCount > 0 && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="outline"
+                        aria-label={`More linked documents for ${task.id}`}
+                        className="h-6 gap-0.5 px-1.5 text-[11px] tabular-nums"
+                      >
+                        +{extraDocsCount} more
+                        <ChevronDown className="size-3" aria-hidden="true" />
+                      </Button>
+                    }
+                  />
+                  <DropdownMenuContent align="start" className="max-h-72 w-72 overflow-y-auto">
+                    {secondaryGroups.map((group, idx) => (
+                      <Fragment key={group.folder}>
+                        {idx > 0 && <DropdownMenuSeparator />}
+                        <DropdownMenuGroup>
+                          <DropdownMenuLabel className="truncate font-mono text-[11px]" title={group.folder}>
+                            {group.label}
+                          </DropdownMenuLabel>
+                          {group.entries.map((entry) => (
+                            <DropdownMenuItem
+                              key={entry.path}
+                              title={entry.path}
+                              onClick={() => onOpenFile({ href: entry.href, path: entry.path })}
+                            >
+                              <FileText className="size-3.5 shrink-0" aria-hidden="true" />
+                              <span className="truncate">{entry.label}</span>
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuGroup>
+                      </Fragment>
+                    ))}
+                    {standaloneEntries.length > 0 && (
+                      <>
+                        {secondaryGroups.length > 0 && <DropdownMenuSeparator />}
+                        <DropdownMenuGroup>
+                          <DropdownMenuLabel className="text-[11px]">Other documents</DropdownMenuLabel>
+                          {standaloneEntries.map((entry) => (
+                            <DropdownMenuItem
+                              key={entry.path}
+                              title={entry.path}
+                              onClick={() => onOpenFile({ href: entry.href, path: entry.path })}
+                            >
+                              <FileText className="size-3.5 shrink-0" aria-hidden="true" />
+                              <span className="truncate">{entry.label}</span>
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuGroup>
+                      </>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )}
             </div>
           )}

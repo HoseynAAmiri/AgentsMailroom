@@ -261,19 +261,31 @@ export function parseTaskStage(nextAction?: string | null): ParsedTaskStage {
   return { stage: null, kind: "malformed", rawPrefix, text: trimmed };
 }
 
+export interface TaskDocFolder {
+  folder: string;
+  label: string;
+  slug: string;
+  context: string | null;
+  dossier: string | null;
+  pdf: string | null;
+  extra: string[];
+}
+
 export interface TaskDocLinks {
   folder: string | null;
   folderLabel: string | null;
   context: string | null;
   dossier: string | null;
   pdf: string | null;
+  folders: TaskDocFolder[];
   other: string[];
 }
 
-const GOAL_FOLDER_RE = /^(docs\/goals-and-tasks\/(G[1-9]\d*\/[^/]+))\//;
+const GOAL_FOLDER_RE = /^(docs\/goals-and-tasks\/((G[1-9]\d*)\/([^/]+)))\//;
+const TASK_ID_RE = /^([A-Za-z]+\d+)\.(\d+)$/;
 
-/** Classify a task's linked repository paths into its goal folder and context/dossier/PDF quick links. */
-export function extractTaskDocLinks(links?: readonly string[] | null): TaskDocLinks {
+/** Classify a task's linked repository paths, prioritizing its canonical task folder while keeping multi-report links reachable. */
+export function extractTaskDocLinks(links?: readonly string[] | null, taskId?: string | null): TaskDocLinks {
   const unique: string[] = [];
   const seen = new Set<string>();
   for (const raw of links ?? []) {
@@ -284,44 +296,151 @@ export function extractTaskDocLinks(links?: readonly string[] | null): TaskDocLi
     }
   }
 
-  let folder: string | null = null;
-  let folderLabel: string | null = null;
+  interface FolderBucket {
+    folder: string;
+    label: string;
+    goal: string;
+    slug: string;
+    items: string[];
+  }
+
+  const bucketMap = new Map<string, FolderBucket>();
+  const standalone: string[] = [];
+
   for (const item of unique) {
     const m = GOAL_FOLDER_RE.exec(item);
     if (m) {
-      folder = m[1];
-      folderLabel = m[2];
-      break;
+      const [, folder, label, goal, slug] = m;
+      let bucket = bucketMap.get(folder);
+      if (!bucket) {
+        bucket = { folder, label, goal, slug, items: [] };
+        bucketMap.set(folder, bucket);
+      }
+      bucket.items.push(item);
+    } else {
+      standalone.push(item);
     }
+  }
+
+  const classifyFolder = (bucket: FolderBucket): { doc: TaskDocFolder; goal: string; richness: number } => {
+    let context: string | null = null;
+    let dossier: string | null = null;
+    const contextCandidates: string[] = [];
+    const folderPdfs: string[] = [];
+    const extra: string[] = [];
+
+    for (const item of bucket.items) {
+      const base = (item.split("/").at(-1) ?? "").toLowerCase();
+      if (/^context.*\.md$/.test(base)) {
+        contextCandidates.push(item);
+      } else if (!dossier && base === "dossier.md") {
+        dossier = item;
+      } else if (base.endsWith(".pdf")) {
+        folderPdfs.push(item);
+      } else {
+        extra.push(item);
+      }
+    }
+
+    if (contextCandidates.length) {
+      context = contextCandidates.find((p) => p.split("/").at(-1)?.toLowerCase() === "context.md") ?? contextCandidates[0];
+      for (const p of contextCandidates) {
+        if (p !== context) extra.push(p);
+      }
+    }
+
+    let pdf: string | null = null;
+    if (folderPdfs.length) {
+      const canonicalPdf = `${bucket.slug.toLowerCase()}.pdf`;
+      pdf = folderPdfs.find((p) => p.split("/").at(-1)?.toLowerCase() === canonicalPdf) ?? folderPdfs[0];
+      for (const p of folderPdfs) {
+        if (p !== pdf) extra.push(p);
+      }
+    }
+
+    const richness = (context ? 1 : 0) + (dossier ? 1 : 0) + (pdf ? 1 : 0);
+    return {
+      doc: {
+        folder: bucket.folder,
+        label: bucket.label,
+        slug: bucket.slug,
+        context,
+        dossier,
+        pdf,
+        extra,
+      },
+      goal: bucket.goal,
+      richness,
+    };
+  };
+
+  const tidMatch = TASK_ID_RE.exec((taskId ?? "").trim());
+  const taskGoalDir = tidMatch ? tidMatch[1].toUpperCase() : null;
+  const taskSlugPrefix = tidMatch ? `${tidMatch[1].toLowerCase()}_${tidMatch[2]}` : null;
+
+  const folderTier = (entry: { doc: TaskDocFolder; goal: string }): number => {
+    const slugLower = entry.doc.slug.toLowerCase();
+    if (taskSlugPrefix && (slugLower === taskSlugPrefix || slugLower.startsWith(`${taskSlugPrefix}_`))) {
+      return 0;
+    }
+    const inGoal = taskGoalDir !== null && entry.goal === taskGoalDir;
+    const hasCoreDoc = entry.doc.context !== null || entry.doc.dossier !== null;
+    if (inGoal && hasCoreDoc) return 1;
+    if (inGoal) return 2;
+    if (hasCoreDoc) return 3;
+    return 4;
+  };
+
+  const ranked = [...bucketMap.values()]
+    .map(classifyFolder)
+    .sort((a, b) => {
+      const tierDiff = folderTier(a) - folderTier(b);
+      if (tierDiff !== 0) return tierDiff;
+      if (a.richness !== b.richness) return b.richness - a.richness;
+      return a.doc.label.localeCompare(b.doc.label);
+    });
+
+  const folders = ranked.map((r) => r.doc);
+  if (folders.length > 0) {
+    const primary = folders[0];
+    const primarySet = new Set([primary.context, primary.dossier, primary.pdf].filter((p): p is string => !!p));
+    return {
+      folder: primary.folder,
+      folderLabel: primary.label,
+      context: primary.context,
+      dossier: primary.dossier,
+      pdf: primary.pdf,
+      folders,
+      other: unique.filter((item) => !primarySet.has(item)),
+    };
   }
 
   let context: string | null = null;
   let dossier: string | null = null;
   let pdf: string | null = null;
-  const pdfs: string[] = [];
   const other: string[] = [];
-
-  for (const item of unique) {
+  for (const item of standalone) {
     const base = (item.split("/").at(-1) ?? "").toLowerCase();
     if (!context && /^context.*\.md$/.test(base)) {
       context = item;
     } else if (!dossier && base === "dossier.md") {
       dossier = item;
-    } else if (base.endsWith(".pdf")) {
-      pdfs.push(item);
+    } else if (!pdf && base.endsWith(".pdf")) {
+      pdf = item;
     } else {
       other.push(item);
     }
   }
 
-  if (pdfs.length) {
-    pdf = (folder ? pdfs.find((p) => p.startsWith(`${folder}/`)) : undefined) ?? pdfs[0];
-    for (const p of pdfs) {
-      if (p !== pdf) other.push(p);
-    }
-  }
-
-  return { folder, folderLabel, context, dossier, pdf, other };
+  return {
+    folder: null,
+    folderLabel: null,
+    context,
+    dossier,
+    pdf,
+    folders: [],
+    other,
+  };
 }
 
 export interface StagedTaskItem<T> {

@@ -266,27 +266,77 @@ test("parseTaskStage enforces strict D38 [Stage] tokens without coercing malform
   }
 });
 
-test("extractTaskDocLinks classifies goal folders, context, dossier, PDF, and extra links", () => {
+test("extractTaskDocLinks classifies goal folders, context, dossier, PDF, and multi-report links", () => {
   const full = extractTaskDocLinks([
     "docs/goals-and-tasks/G1/g1_1_ibamr_examples_and_first_checks/context.md",
     "docs/goals-and-tasks/G1/g1_1_ibamr_examples_and_first_checks/dossier.md",
     "docs/goals-and-tasks/G1/g1_1_ibamr_examples_and_first_checks/g1_1_ibamr_examples_and_first_checks.pdf",
     "docs/PLAN.md",
-  ]);
+  ], "G1.1");
   assert.deepEqual(full, {
     folder: "docs/goals-and-tasks/G1/g1_1_ibamr_examples_and_first_checks",
     folderLabel: "G1/g1_1_ibamr_examples_and_first_checks",
     context: "docs/goals-and-tasks/G1/g1_1_ibamr_examples_and_first_checks/context.md",
     dossier: "docs/goals-and-tasks/G1/g1_1_ibamr_examples_and_first_checks/dossier.md",
     pdf: "docs/goals-and-tasks/G1/g1_1_ibamr_examples_and_first_checks/g1_1_ibamr_examples_and_first_checks.pdf",
+    folders: [
+      {
+        folder: "docs/goals-and-tasks/G1/g1_1_ibamr_examples_and_first_checks",
+        label: "G1/g1_1_ibamr_examples_and_first_checks",
+        slug: "g1_1_ibamr_examples_and_first_checks",
+        context: "docs/goals-and-tasks/G1/g1_1_ibamr_examples_and_first_checks/context.md",
+        dossier: "docs/goals-and-tasks/G1/g1_1_ibamr_examples_and_first_checks/dossier.md",
+        pdf: "docs/goals-and-tasks/G1/g1_1_ibamr_examples_and_first_checks/g1_1_ibamr_examples_and_first_checks.pdf",
+        extra: [],
+      },
+    ],
     other: ["docs/PLAN.md"],
   });
 
-  const ctxOnly = extractTaskDocLinks(["docs/goals-and-tasks/G6/g6_12_task_logic/context.md"]);
+  // Canonical G7.13 task folder wins over earlier alphabetical cross-goal PDFs while preserving all reports
+  const g713 = extractTaskDocLinks([
+    "docs/PAPER_PARTS_MAP.md",
+    "docs/goals-and-tasks/G1/g1_3_constitutive_and_ibfe_formulation/g1_3_constitutive_and_ibfe_formulation.pdf",
+    "docs/goals-and-tasks/G5/g5_1_sideview_coverage_comparison/g5_1_sideview_coverage_comparison.pdf",
+    "docs/goals-and-tasks/G7/g7_13_paper_dismantle/context.md",
+    "docs/goals-and-tasks/G7/g7_13_paper_dismantle/dossier.md",
+    "docs/goals-and-tasks/G7/g7_13_paper_dismantle/g7_13_paper_dismantle.pdf",
+  ], "G7.13");
+  assert.equal(g713.folderLabel, "G7/g7_13_paper_dismantle");
+  assert.equal(g713.context, "docs/goals-and-tasks/G7/g7_13_paper_dismantle/context.md");
+  assert.equal(g713.dossier, "docs/goals-and-tasks/G7/g7_13_paper_dismantle/dossier.md");
+  assert.equal(g713.pdf, "docs/goals-and-tasks/G7/g7_13_paper_dismantle/g7_13_paper_dismantle.pdf");
+  assert.equal(g713.folders.length, 3);
+  assert.deepEqual(g713.folders.slice(1).map((f) => f.label), [
+    "G1/g1_3_constitutive_and_ibfe_formulation",
+    "G5/g5_1_sideview_coverage_comparison",
+  ]);
+  assert.deepEqual(g713.other, [
+    "docs/PAPER_PARTS_MAP.md",
+    "docs/goals-and-tasks/G1/g1_3_constitutive_and_ibfe_formulation/g1_3_constitutive_and_ibfe_formulation.pdf",
+    "docs/goals-and-tasks/G5/g5_1_sideview_coverage_comparison/g5_1_sideview_coverage_comparison.pdf",
+  ]);
+
+  // Multi-report G2.10 prioritizes canonical g2_10 folder while retaining platen companion folders
+  const g210 = extractTaskDocLinks([
+    "docs/goals-and-tasks/G2/g2_10_afm_and_viscoelastic_verification/context.md",
+    "docs/goals-and-tasks/G2/g2_10_afm_and_viscoelastic_verification/dossier.md",
+    "docs/goals-and-tasks/G2/g2_10_afm_and_viscoelastic_verification/g2_10_afm_and_viscoelastic_verification.pdf",
+    "docs/goals-and-tasks/G2/platen_dt_halving/dossier.md",
+    "docs/goals-and-tasks/G2/platen_dt_halving/platen_dt_halving.pdf",
+    "docs/goals-and-tasks/G2/platen_force/dossier.md",
+    "docs/goals-and-tasks/G2/platen_force/platen_force.pdf",
+  ], "G2.10");
+  assert.equal(g210.folderLabel, "G2/g2_10_afm_and_viscoelastic_verification");
+  assert.equal(g210.pdf, "docs/goals-and-tasks/G2/g2_10_afm_and_viscoelastic_verification/g2_10_afm_and_viscoelastic_verification.pdf");
+  assert.deepEqual(g210.folders.slice(1).map((f) => f.label), ["G2/platen_dt_halving", "G2/platen_force"]);
+
+  const ctxOnly = extractTaskDocLinks(["docs/goals-and-tasks/G6/g6_12_task_logic/context.md"], "G6.12");
   assert.equal(ctxOnly.folderLabel, "G6/g6_12_task_logic");
   assert.equal(ctxOnly.context, "docs/goals-and-tasks/G6/g6_12_task_logic/context.md");
   assert.equal(ctxOnly.dossier, null);
   assert.equal(ctxOnly.pdf, null);
+  assert.equal(ctxOnly.folders.length, 1);
 
   assert.deepEqual(extractTaskDocLinks([]), {
     folder: null,
@@ -294,6 +344,7 @@ test("extractTaskDocLinks classifies goal folders, context, dossier, PDF, and ex
     context: null,
     dossier: null,
     pdf: null,
+    folders: [],
     other: [],
   });
 });

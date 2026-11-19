@@ -196,7 +196,7 @@ def todo_read(params, *, admin: bool):
         tags, _ = store.activity()
         key = params["event_id"]
         return {"override": key in tags, "task_id": tags.get(key)}
-    data = store.listing()
+    data = store.listing(include_links=admin)
     item = params.get("id")
     if item is None:
         return data

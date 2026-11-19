@@ -117,7 +117,16 @@ class StandaloneSmoke(unittest.TestCase):
                 self.assertIn(uploaded["name"], json.dumps(detail))
                 read(admin, "/api/todo", post={"action": "link", "id": "G1.1", "path": "docs/goals-and-tasks/G1/g1_1_demo/context.md"})
                 goals_after = read(admin, "/api/todo")
-                self.assertIn("docs/goals-and-tasks/G1/g1_1_demo/context.md", goals_after["tasks"][0]["links"])
+                admin_links = goals_after["tasks"][0]["links"]
+                self.assertIn("docs/goals-and-tasks/G1/g1_1_demo/context.md", admin_links)
+                self.assertIn(f"coordination/attachments/{uploaded['name']}", admin_links)
+                goals_pub = read(public, "/api/todo")
+                self.assertNotIn("links", goals_pub["tasks"][0])
+                self.assertNotIn(uploaded["name"], json.dumps(goals_pub))
+                detail_pub = read(public, "/api/todo?id=G1.1")
+                self.assertNotIn("links", detail_pub["task"])
+                self.assertNotIn(uploaded["name"], json.dumps(detail_pub))
+                self.assertNotIn("docs/goals-and-tasks/G1/g1_1_demo/context.md", json.dumps(detail_pub))
             finally:
                 server.terminate()
                 try:

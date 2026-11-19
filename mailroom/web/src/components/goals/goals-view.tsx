@@ -21,7 +21,7 @@ import { api, fileHref } from "@/lib/api";
 import { GOAL_STATE_STYLE, TASK_STAGES, parseTaskStage, plainTaskTitle } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useMailroom } from "@/components/mailroom/context";
-import { GoalsBoard, StageBadge, StateBadge, titleParts, type GoalSummary as Goal, type GoalTask as Task } from "@/components/goals/goals-board";
+import { DecisionBadge, GoalsBoard, StageBadge, StateBadge, titleParts, type GoalSummary as Goal, type GoalTask as Task } from "@/components/goals/goals-board";
 
 interface Tracker { goals: Goal[]; tasks: Task[]; order_revision: number; revision: number }
 interface Evidence {
@@ -353,6 +353,7 @@ export function GoalsView() {
                               <span className="flex flex-wrap items-center gap-1.5">
                                 <Badge variant="ghost" className="px-0 font-mono text-muted-foreground">{row.id}</Badge>
                                 <StateBadge task={row} />
+                                <DecisionBadge decision={row.decision} />
                                 <StageBadge stage={parsed.stage} parsed={parsed} />
                                 {row.priority !== "normal" && <Badge variant="outline">{row.priority === "high" ? "High priority" : "Low priority"}</Badge>}
                                 {row.owner && <Badge variant="outline">{row.owner === "user" ? "USER" : row.owner}</Badge>}
@@ -384,6 +385,7 @@ export function GoalsView() {
                     {task ? <>
                       <Badge variant="outline" className="font-mono">{task.id}</Badge>
                       <StateBadge task={task} />
+                      <DecisionBadge decision={task.decision} />
                       <StageBadge stage={parsedDetail?.stage ?? null} parsed={parsedDetail ?? undefined} />
                       <Badge variant="outline">{task.priority} priority</Badge>
                       <Badge variant="outline">{task.owner === "user" ? "USER" : task.owner || "Unassigned"}</Badge>
