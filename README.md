@@ -24,9 +24,14 @@ that uses it, not here.
 ## Build the web app
 
 ```bash
+# Enter the directory that contains the web app.
 cd mailroom/web
+
+# Install the dependency versions pinned in package-lock.json.
 npm ci
-npm run build      # static export in out/
+
+# Write the production pages and assets to out/.
+npm run build
 ```
 
 ## Run with an existing Mailroom store
@@ -44,7 +49,11 @@ and store tooling.
 3. From the project checkout, check the locator and run the server:
 
    ```bash
+   # Show which store the CLI found and check its required folders.
    python3 coordination/bus/coord_store.py check
+
+   # Serve the agent API on port 8766 and the admin UI on port 8768.
+   # The loopback address keeps both listeners on this machine.
    python3 coordination/bus/bus.py serve --host 127.0.0.1 --port 8766 --admin-port 8768
    ```
 
