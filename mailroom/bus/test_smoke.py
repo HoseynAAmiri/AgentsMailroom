@@ -115,6 +115,9 @@ class StandaloneSmoke(unittest.TestCase):
                 self.assertEqual(read(admin, "/attach/" + uploaded["name"]), b"Review note")
                 detail = read(admin, "/api/todo?id=G1.1")
                 self.assertIn(uploaded["name"], json.dumps(detail))
+                read(admin, "/api/todo", post={"action": "link", "id": "G1.1", "path": "docs/goals-and-tasks/G1/g1_1_demo/context.md"})
+                goals_after = read(admin, "/api/todo")
+                self.assertIn("docs/goals-and-tasks/G1/g1_1_demo/context.md", goals_after["tasks"][0]["links"])
             finally:
                 server.terminate()
                 try:

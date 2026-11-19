@@ -11,6 +11,8 @@ const {
   TASK_STAGE_STYLE,
   buildLastActivityMap,
   effectiveState,
+  extractTaskDocLinks,
+  groupTasksByStage,
   isFutureOutlier,
   latestActivityTs,
   parseTaskStage,
@@ -199,40 +201,133 @@ test("e2506/e2510: snapshot arrival advances shared evaluation clock across even
   assert.equal(effectiveState(makeAgent({ id: "a2", last_active: outlier60s }), null, evalNow), "inactive");
 });
 
-test("parseTaskStage extracts valid D38 [Stage] prefixes and preserves trailing text", () => {
+test("parseTaskStage enforces strict D38 [Stage] tokens without coercing malformed rows", () => {
   assert.deepEqual([...TASK_STAGES], ["Inbox", "Assign", "Stage", "Run", "Review", "Done", "Result"]);
   for (const stage of TASK_STAGES) {
     assert.equal(TASK_STAGE_STYLE[stage].label, stage);
     assert.ok(TASK_STAGE_STYLE[stage].cls.length > 0);
     assert.deepEqual(parseTaskStage(`[${stage}] Next step for ${stage}`), {
       stage,
+      kind: "valid",
+      rawPrefix: stage,
       text: `Next step for ${stage}`,
     });
   }
 
-  // Case-insensitive normalization & surrounding whitespace
-  assert.deepEqual(parseTaskStage("  [review]   Wait for a2  "), {
+  // Leading whitespace, stage-only input, and multiline bodies stay valid
+  assert.deepEqual(parseTaskStage("  [Review] Wait for a2  "), {
     stage: "Review",
+    kind: "valid",
+    rawPrefix: "Review",
     text: "Wait for a2",
   });
-  assert.deepEqual(parseTaskStage("[ STAGE ] Draft case definition"), {
-    stage: "Stage",
-    text: "Draft case definition",
+  assert.deepEqual(parseTaskStage("[Result]"), {
+    stage: "Result",
+    kind: "valid",
+    rawPrefix: "Result",
+    text: "",
   });
-
-  // Stage-only input and multiline bodies
-  assert.deepEqual(parseTaskStage("[Result]"), { stage: "Result", text: "" });
   assert.deepEqual(parseTaskStage("[Stage] Line 1\nLine 2"), {
     stage: "Stage",
+    kind: "valid",
+    rawPrefix: "Stage",
     text: "Line 1\nLine 2",
   });
 
-  // Unknown prefixes and plain/empty values keep text and return null stage
-  assert.deepEqual(parseTaskStage("[WIP] draft"), { stage: null, text: "[WIP] draft" });
-  assert.deepEqual(parseTaskStage("[] empty"), { stage: null, text: "[] empty" });
-  assert.deepEqual(parseTaskStage("Plain next action"), { stage: null, text: "Plain next action" });
-  assert.deepEqual(parseTaskStage("   "), { stage: null, text: "" });
-  assert.deepEqual(parseTaskStage(""), { stage: null, text: "" });
-  assert.deepEqual(parseTaskStage(null), { stage: null, text: "" });
-  assert.deepEqual(parseTaskStage(undefined), { stage: null, text: "" });
+  // Lowercase, padded, unknown, and empty brackets are flagged malformed (never coerced)
+  for (const [raw, prefix] of [
+    ["  [review]   Wait for a2  ", "review"],
+    ["[ STAGE ] Draft case definition", " STAGE "],
+    ["[WIP] draft", "WIP"],
+    ["[] empty", ""],
+  ] as const) {
+    assert.deepEqual(parseTaskStage(raw), {
+      stage: null,
+      kind: "malformed",
+      rawPrefix: prefix,
+      text: raw.trim(),
+    });
+  }
+
+  // Plain and empty values are unprefixed
+  assert.deepEqual(parseTaskStage("Plain next action"), {
+    stage: null,
+    kind: "unprefixed",
+    rawPrefix: null,
+    text: "Plain next action",
+  });
+  for (const blank of ["   ", "", null, undefined] as const) {
+    assert.deepEqual(parseTaskStage(blank), {
+      stage: null,
+      kind: "unprefixed",
+      rawPrefix: null,
+      text: "",
+    });
+  }
+});
+
+test("extractTaskDocLinks classifies goal folders, context, dossier, PDF, and extra links", () => {
+  const full = extractTaskDocLinks([
+    "docs/goals-and-tasks/G1/g1_1_ibamr_examples_and_first_checks/context.md",
+    "docs/goals-and-tasks/G1/g1_1_ibamr_examples_and_first_checks/dossier.md",
+    "docs/goals-and-tasks/G1/g1_1_ibamr_examples_and_first_checks/g1_1_ibamr_examples_and_first_checks.pdf",
+    "docs/PLAN.md",
+  ]);
+  assert.deepEqual(full, {
+    folder: "docs/goals-and-tasks/G1/g1_1_ibamr_examples_and_first_checks",
+    folderLabel: "G1/g1_1_ibamr_examples_and_first_checks",
+    context: "docs/goals-and-tasks/G1/g1_1_ibamr_examples_and_first_checks/context.md",
+    dossier: "docs/goals-and-tasks/G1/g1_1_ibamr_examples_and_first_checks/dossier.md",
+    pdf: "docs/goals-and-tasks/G1/g1_1_ibamr_examples_and_first_checks/g1_1_ibamr_examples_and_first_checks.pdf",
+    other: ["docs/PLAN.md"],
+  });
+
+  const ctxOnly = extractTaskDocLinks(["docs/goals-and-tasks/G6/g6_12_task_logic/context.md"]);
+  assert.equal(ctxOnly.folderLabel, "G6/g6_12_task_logic");
+  assert.equal(ctxOnly.context, "docs/goals-and-tasks/G6/g6_12_task_logic/context.md");
+  assert.equal(ctxOnly.dossier, null);
+  assert.equal(ctxOnly.pdf, null);
+
+  assert.deepEqual(extractTaskDocLinks([]), {
+    folder: null,
+    folderLabel: null,
+    context: null,
+    dossier: null,
+    pdf: null,
+    other: [],
+  });
+});
+
+test("groupTasksByStage places all 7 canonical stages and preserves malformed/unprefixed rows in unstaged", () => {
+  const sample = [
+    { id: "T1", next_action: "[Inbox] new" },
+    { id: "T2", next_action: "[Assign] scoped" },
+    { id: "T3", next_action: "[Stage] manifest" },
+    { id: "T4", next_action: "[Run] active" },
+    { id: "T5", next_action: "[Review] Line 1\nLine 2" },
+    { id: "T6", next_action: "[Done] pdf" },
+    { id: "T7", next_action: "[Result] shipped" },
+    { id: "T8", next_action: "legacy plain action" },
+    { id: "T9", next_action: "[review] lowercase" },
+  ];
+  const grouped = groupTasksByStage(sample);
+  assert.deepEqual(
+    grouped.columns.map((c) => [c.stage, c.items.map((x) => x.task.id)]),
+    [
+      ["Inbox", ["T1"]],
+      ["Assign", ["T2"]],
+      ["Stage", ["T3"]],
+      ["Run", ["T4"]],
+      ["Review", ["T5"]],
+      ["Done", ["T6"]],
+      ["Result", ["T7"]],
+    ],
+  );
+  assert.deepEqual(
+    grouped.unstaged.map((x) => [x.task.id, x.parsed.kind, x.parsed.rawPrefix]),
+    [
+      ["T8", "unprefixed", null],
+      ["T9", "malformed", "review"],
+    ],
+  );
 });

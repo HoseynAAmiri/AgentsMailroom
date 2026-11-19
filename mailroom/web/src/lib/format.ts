@@ -230,19 +230,127 @@ export const TASK_STAGE_STYLE: Record<TaskStage, { label: TaskStage; cls: string
   Result: { label: "Result", cls: "border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" },
 };
 
-const TASK_STAGE_BY_LOWER = new Map<string, TaskStage>(
-  TASK_STAGES.map((stage) => [stage.toLowerCase(), stage]),
-);
-const TASK_STAGE_PREFIX_RE = /^\s*\[([^\]]+)\](?:\s*([\s\S]*))?$/;
+const TASK_STAGE_SET = new Set<string>(TASK_STAGES);
+const TASK_STAGE_PREFIX_RE = /^\s*\[([^\]]*)\](?:\s*([\s\S]*))?$/;
 
-/** Parse the D38 `[Stage]` prefix from `next_action`, preserving trailing text. */
-export function parseTaskStage(nextAction?: string | null): { stage: TaskStage | null; text: string } {
-  if (!nextAction) return { stage: null, text: "" };
+export type TaskStageKind = "valid" | "unprefixed" | "malformed";
+
+export interface ParsedTaskStage {
+  stage: TaskStage | null;
+  kind: TaskStageKind;
+  rawPrefix: string | null;
+  text: string;
+}
+
+/** Parse the D38 `[Stage]` prefix strictly without coercing lowercase/padded/unknown tokens. */
+export function parseTaskStage(nextAction?: string | null): ParsedTaskStage {
+  if (!nextAction) return { stage: null, kind: "unprefixed", rawPrefix: null, text: "" };
+  const trimmed = nextAction.trim();
+  if (!trimmed) return { stage: null, kind: "unprefixed", rawPrefix: null, text: "" };
   const match = TASK_STAGE_PREFIX_RE.exec(nextAction);
-  if (!match) return { stage: null, text: nextAction.trim() };
-  const stage = TASK_STAGE_BY_LOWER.get(match[1].trim().toLowerCase()) ?? null;
-  if (!stage) return { stage: null, text: nextAction.trim() };
-  return { stage, text: (match[2] ?? "").trim() };
+  if (!match) return { stage: null, kind: "unprefixed", rawPrefix: null, text: trimmed };
+  const rawPrefix = match[1];
+  if (TASK_STAGE_SET.has(rawPrefix)) {
+    return {
+      stage: rawPrefix as TaskStage,
+      kind: "valid",
+      rawPrefix,
+      text: (match[2] ?? "").trim(),
+    };
+  }
+  return { stage: null, kind: "malformed", rawPrefix, text: trimmed };
+}
+
+export interface TaskDocLinks {
+  folder: string | null;
+  folderLabel: string | null;
+  context: string | null;
+  dossier: string | null;
+  pdf: string | null;
+  other: string[];
+}
+
+const GOAL_FOLDER_RE = /^(docs\/goals-and-tasks\/(G[1-9]\d*\/[^/]+))\//;
+
+/** Classify a task's linked repository paths into its goal folder and context/dossier/PDF quick links. */
+export function extractTaskDocLinks(links?: readonly string[] | null): TaskDocLinks {
+  const unique: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of links ?? []) {
+    const clean = raw.trim();
+    if (clean && !seen.has(clean)) {
+      seen.add(clean);
+      unique.push(clean);
+    }
+  }
+
+  let folder: string | null = null;
+  let folderLabel: string | null = null;
+  for (const item of unique) {
+    const m = GOAL_FOLDER_RE.exec(item);
+    if (m) {
+      folder = m[1];
+      folderLabel = m[2];
+      break;
+    }
+  }
+
+  let context: string | null = null;
+  let dossier: string | null = null;
+  let pdf: string | null = null;
+  const pdfs: string[] = [];
+  const other: string[] = [];
+
+  for (const item of unique) {
+    const base = (item.split("/").at(-1) ?? "").toLowerCase();
+    if (!context && /^context.*\.md$/.test(base)) {
+      context = item;
+    } else if (!dossier && base === "dossier.md") {
+      dossier = item;
+    } else if (base.endsWith(".pdf")) {
+      pdfs.push(item);
+    } else {
+      other.push(item);
+    }
+  }
+
+  if (pdfs.length) {
+    pdf = (folder ? pdfs.find((p) => p.startsWith(`${folder}/`)) : undefined) ?? pdfs[0];
+    for (const p of pdfs) {
+      if (p !== pdf) other.push(p);
+    }
+  }
+
+  return { folder, folderLabel, context, dossier, pdf, other };
+}
+
+export interface StagedTaskItem<T> {
+  task: T;
+  parsed: ParsedTaskStage;
+}
+
+/** Group tasks into the 7 canonical D38 stage columns while retaining unprefixed/malformed rows separately. */
+export function groupTasksByStage<T extends { next_action?: string | null }>(
+  tasks: readonly T[],
+): {
+  columns: { stage: TaskStage; items: StagedTaskItem<T>[] }[];
+  unstaged: StagedTaskItem<T>[];
+} {
+  const byStage = new Map<TaskStage, StagedTaskItem<T>[]>(TASK_STAGES.map((stage) => [stage, []]));
+  const unstaged: StagedTaskItem<T>[] = [];
+  for (const task of tasks) {
+    const parsed = parseTaskStage(task.next_action);
+    const entry = { task, parsed };
+    if (parsed.stage) {
+      byStage.get(parsed.stage)!.push(entry);
+    } else {
+      unstaged.push(entry);
+    }
+  }
+  return {
+    columns: TASK_STAGES.map((stage) => ({ stage, items: byStage.get(stage)! })),
+    unstaged,
+  };
 }
 
 export function plainTaskTitle(title: string) {

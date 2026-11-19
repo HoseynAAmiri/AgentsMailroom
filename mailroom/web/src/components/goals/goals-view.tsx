@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { ArrowDown, ArrowLeft, ArrowUp, ArrowUpToLine, ChevronRight, CircleCheck, FileText, Link2, ListFilter, MessageSquare, MoreHorizontal, Plus, Tag, TriangleAlert, Upload } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, ArrowUpToLine, ChevronRight, CircleCheck, Columns3, FileText, Link2, List, ListFilter, MessageSquare, MoreHorizontal, Plus, Tag, Target, TriangleAlert, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,23 +18,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SearchableSelect, type SearchOption } from "@/components/ui/searchable-select";
 import { useBackLayer } from "@/hooks/use-back-layer";
 import { api, fileHref } from "@/lib/api";
-import { GOAL_STATE_STYLE, TASK_STAGES, TASK_STAGE_STYLE, parseTaskStage, plainTaskTitle, type TaskStage } from "@/lib/format";
+import { GOAL_STATE_STYLE, TASK_STAGES, parseTaskStage, plainTaskTitle } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useMailroom } from "@/components/mailroom/context";
+import { GoalsBoard, StageBadge, StateBadge, titleParts, type GoalSummary as Goal, type GoalTask as Task } from "@/components/goals/goals-board";
 
-type State = "todo" | "doing" | "blocked" | "done";
-type Priority = "high" | "normal" | "low";
-interface Goal { id: string; title: string; revision: number }
-interface Task extends Goal {
-  goal_id: string;
-  state: State;
-  priority: Priority;
-  owner: string;
-  next_action: string;
-  blocker: string;
-  notes: string;
-  decision: number;
-}
 interface Tracker { goals: Goal[]; tasks: Task[]; order_revision: number; revision: number }
 interface Evidence {
   events: { id: string; from: string; subject?: string; task_id?: string; excerpt: string; type: string }[];
@@ -44,38 +32,12 @@ interface Evidence {
   file_total: number;
 }
 type Edit = { kind: "goal" | "task"; id?: string; revision?: number; fields: Record<string, string | boolean> };
+type GoalsViewMode = "board" | "list" | "goals";
 const textClass = "text-sm text-muted-foreground";
 const pageSize = 30;
 const stateOptions = Object.entries(GOAL_STATE_STYLE).map(([value, { label }]) => ({ value, label }));
 const stageOptions = TASK_STAGES.map((value) => ({ value, label: value }));
 const priorities = ["high", "normal", "low"].map((value) => ({ value, label: value[0].toUpperCase() + value.slice(1) }));
-
-function titleParts(title: string) {
-  const plain = plainTaskTitle(title);
-  const end = plain.search(/[.!?]\s+(?=[A-Z])/);
-  return end < 0 ? { heading: plain, rest: "" } : { heading: plain.slice(0, end + 1), rest: plain.slice(end + 1).trim() };
-}
-
-function StateBadge({ task }: { task: Task }) {
-  return <Badge variant="secondary" className={GOAL_STATE_STYLE[task.state].cls}>
-    {task.state === "done" && <CircleCheck data-icon="inline-start" aria-hidden="true" />}
-    {task.decision ? "USER decision" : GOAL_STATE_STYLE[task.state].label}
-  </Badge>;
-}
-
-function StageBadge({ stage }: { stage: TaskStage | null }) {
-  if (!stage) return null;
-  return (
-    <Badge
-      variant="outline"
-      data-stage={stage}
-      title={`Stage: ${stage}`}
-      className={TASK_STAGE_STYLE[stage].cls}
-    >
-      {TASK_STAGE_STYLE[stage].label}
-    </Badge>
-  );
-}
 
 async function request<T>(url: string, body?: unknown): Promise<T> {
   const response = await fetch(url, {
@@ -98,7 +60,7 @@ export function GoalsView() {
   const [ownerFilter, setOwnerFilter] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
   const [decisionsOnly, setDecisionsOnly] = useState(false);
-  const [showAll, setShowAll] = useState(false);
+  const [viewMode, setViewMode] = useState<GoalsViewMode>("board");
   const [showFilters, setShowFilters] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<{ filter: string; ids: string[] }>();
   const [evidence, setEvidence] = useState<Evidence>();
@@ -134,7 +96,7 @@ export function GoalsView() {
 
   useEffect(() => {
     const controller = new AbortController();
-    void load(controller.signal);
+    queueMicrotask(() => { void load(controller.signal); });
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") void load(controller.signal);
     }, 15000);
@@ -250,17 +212,13 @@ export function GoalsView() {
   const orderAvailable = !stateFilter && !stageFilter && !ownerFilter && !priorityFilter && !search.trim() && !decisionsOnly;
   const groups = data?.goals.filter((row) => !goalFilter || goalFilter === row.id) ?? [];
   const detailOpen = !!selected;
-  const showOverview = !goalFilter && !showAll && orderAvailable;
   const groupFilter = JSON.stringify([goalFilter, stateFilter, stageFilter, ownerFilter, priorityFilter, search.trim(), decisionsOnly]);
   const visibleGroupIds = [...new Set(rows.map((row) => row.goal_id))];
   const openGroups = expandedGroups?.filter === groupFilter
     ? expandedGroups.ids : goalFilter ? [goalFilter] : orderAvailable ? visibleGroupIds.slice(0, 1) : visibleGroupIds;
   const detail = task ? titleParts(task.title) : { heading: selected === "untagged" ? "Untagged" : "Task unavailable", rest: "" };
+  const parsedDetail = task ? parseTaskStage(task.next_action) : null;
   const withChoice = (label: string, options: SearchOption[]): SearchOption[] => [{ value: "", label }, ...options];
-
-  function backToOverview() {
-    setGoalFilter(""); setStateFilter(""); setStageFilter(""); setOwnerFilter(""); setPriorityFilter(""); setDecisionsOnly(false); setShowAll(false);
-  }
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
@@ -273,54 +231,73 @@ export function GoalsView() {
       </header>
       {error && <div role="alert" className="border-b px-3 py-2 text-sm text-destructive">{error}</div>}
       {data ? (
-        <div className={cn("grid min-h-0 flex-1", detailOpen && "min-[900px]:grid-cols-[minmax(19rem,2fr)_minmax(0,3fr)]")}>
+        <div className={cn("grid min-h-0 flex-1", detailOpen && "min-[900px]:grid-cols-[minmax(20rem,2fr)_minmax(0,3fr)]")}>
           <div ref={listRef} className={cn("min-h-0 min-w-0 overflow-y-auto", detailOpen && "hidden min-[900px]:block min-[900px]:border-r")}>
-            <div className="mx-auto max-w-6xl px-3 py-4 sm:px-5">
+            <div className={cn("min-w-0 px-3 py-4 sm:px-5", viewMode === "board" && !detailOpen ? "w-full" : "mx-auto max-w-6xl")}>
               <div className="mb-4 flex flex-wrap items-center gap-2">
-                <Button size="sm" variant={showOverview ? "secondary" : "ghost"} className="h-10 touch:h-11" onClick={backToOverview}>
-                  Overview
+                <Button size="sm" variant={viewMode === "board" && !decisionsOnly ? "secondary" : "ghost"} className="h-10 touch:h-11"
+                  onClick={() => { setDecisionsOnly(false); setViewMode("board"); }}>
+                  <Columns3 /> Board <Badge variant="outline">{rows.length}</Badge>
                 </Button>
-                <Button size="sm" variant={!showOverview && !goalFilter && !decisionsOnly ? "secondary" : "ghost"} className="h-10 touch:h-11"
-                  onClick={() => { setGoalFilter(""); setDecisionsOnly(false); setShowAll(true); }}>
-                  All tasks <Badge variant="outline">{data.tasks.length}</Badge>
+                <Button size="sm" variant={viewMode === "list" && !decisionsOnly ? "secondary" : "ghost"} className="h-10 touch:h-11"
+                  onClick={() => { setDecisionsOnly(false); setViewMode("list"); }}>
+                  <List /> List <Badge variant="outline">{rows.length}</Badge>
+                </Button>
+                <Button size="sm" variant={viewMode === "goals" ? "secondary" : "ghost"} className="h-10 touch:h-11"
+                  onClick={() => {
+                    setGoalFilter(""); setStateFilter(""); setStageFilter(""); setOwnerFilter(""); setPriorityFilter("");
+                    setDecisionsOnly(false); setViewMode("goals");
+                  }}>
+                  <Target /> Goals <Badge variant="outline">{data.goals.length}</Badge>
                 </Button>
                 <Button size="sm" variant={decisionsOnly ? "secondary" : "ghost"} className="h-10 touch:h-11" aria-pressed={decisionsOnly}
                   onClick={() => {
                     setGoalFilter(""); setStateFilter(""); setStageFilter(""); setOwnerFilter(""); setPriorityFilter("");
-                    setDecisionsOnly((value) => !value);
+                    setDecisionsOnly((value) => {
+                      const next = !value;
+                      if (next && viewMode === "goals") setViewMode("board");
+                      return next;
+                    });
                   }}>
                   <TriangleAlert /> USER decisions <Badge variant="outline">{data.tasks.filter((row) => row.decision).length}</Badge>
                 </Button>
                 <Button size="icon" variant={showFilters ? "secondary" : "ghost"} className="size-10 touch:size-11" aria-label="Filters" aria-expanded={showFilters}
-                  title="Filters" onClick={() => setShowFilters((value) => !value)}><ListFilter /></Button>
+                  title="Filters" onClick={() => {
+                    setShowFilters((value) => !value);
+                    if (viewMode === "goals") setViewMode("board");
+                  }}><ListFilter /></Button>
                 {admin && <Button size="sm" variant="ghost" className="h-10 touch:h-11" onClick={() => choose("untagged")}><Tag /> Untagged</Button>}
               </div>
-              {showOverview && <Card size="sm" className="mb-4">
+              {viewMode === "goals" && <Card size="sm" className="mb-4">
                 <CardHeader><CardTitle>How to use Goals</CardTitle></CardHeader>
                 <CardContent className={textClass}>
-                  Open a goal, then choose a task. <strong>Overview</strong> shows its status and next action.{" "}
-                  {admin && <>Use <strong>Edit task</strong> to update them, <strong>Discussion</strong> to read or start mail tagged
-                    with that task ID, and <strong>Documents</strong> to open, link, or upload files. Use <strong>Untagged</strong> to
-                    assign recent mail and files that still need a task.</>}
+                  Use <strong>Board</strong> to follow every task across the 7 pipeline stages, or open a goal below to filter the board.{" "}
+                  {admin && <>Select any card for <strong>Overview</strong>, <strong>Discussion</strong>, and <strong>Documents</strong>,
+                    or open linked context/dossier/PDF files directly from the card.</>}
                 </CardContent>
               </Card>}
-              {showFilters && <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 min-[900px]:grid-cols-2" aria-label="Task filters">
+              {showFilters && viewMode !== "goals" && <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 min-[900px]:grid-cols-2" aria-label="Task filters">
                 <SearchableSelect label="Filter by goal" value={goalFilter} onChange={setGoalFilter} options={withChoice("All goals", goalOptions)} />
                 <SearchableSelect label="Filter by state" value={stateFilter} onChange={setStateFilter} options={withChoice("Any state", stateOptions)} />
                 <SearchableSelect label="Filter by stage" value={stageFilter} onChange={setStageFilter}
-                  options={withChoice("Any stage", [...stageOptions, { value: "-", label: "No stage" }])} />
+                  options={withChoice("Any stage", [...stageOptions, { value: "-", label: "No stage / malformed" }])} />
                 <SearchableSelect label="Filter by owner" value={ownerFilter} onChange={setOwnerFilter}
                   options={withChoice("Any owner", [{ value: "-", label: "Unassigned" }, ...personOptions])} />
                 <SearchableSelect label="Filter by priority" value={priorityFilter} onChange={setPriorityFilter} options={withChoice("Any priority", priorities)} />
               </div>}
-              {showOverview ? <div className={cn("grid grid-cols-1 gap-3 sm:grid-cols-2", detailOpen ? "min-[900px]:grid-cols-1" : "xl:grid-cols-3")}>
+              {viewMode === "board" ? (
+                <>
+                  {!rows.length && <Card size="sm" className="mb-3"><CardContent className={textClass}>No tasks match.</CardContent></Card>}
+                  <GoalsBoard tasks={rows} selectedId={selected} onSelect={choose} onOpenFile={openFile} />
+                </>
+              ) : viewMode === "goals" ? <div className={cn("grid grid-cols-1 gap-3 sm:grid-cols-2", detailOpen ? "min-[900px]:grid-cols-1" : "xl:grid-cols-3")}>
                 {data.goals.map((group) => {
                   const items = data.tasks.filter((row) => row.goal_id === group.id);
                   const done = items.filter((row) => row.state === "done").length;
                   const blocked = items.filter((row) => row.state === "blocked").length;
                   return <Card className="relative border border-transparent shadow-sm hover:border-primary/40" key={group.id}>
                     <Button variant="ghost" aria-label={`Open ${group.id} ${group.title}`} className="absolute inset-0 z-10 size-full bg-transparent hover:bg-primary/5"
-                      onClick={() => setGoalFilter(group.id)} />
+                      onClick={() => { setGoalFilter(group.id); setViewMode("board"); }} />
                     <CardHeader className="gap-2">
                       <div className="flex items-center justify-between">
                         <Badge variant="outline" className="font-mono text-muted-foreground">{group.id}</Badge>
@@ -363,7 +340,7 @@ export function GoalsView() {
                     <AccordionContent>
                     <ul className="space-y-2">
                       {items.map((row) => {
-                        const { stage } = parseTaskStage(row.next_action);
+                        const parsed = parseTaskStage(row.next_action);
                         return <li key={row.id}>
                         <Card size="sm" className={cn(
                           "gap-0 py-0 shadow-none",
@@ -376,7 +353,7 @@ export function GoalsView() {
                               <span className="flex flex-wrap items-center gap-1.5">
                                 <Badge variant="ghost" className="px-0 font-mono text-muted-foreground">{row.id}</Badge>
                                 <StateBadge task={row} />
-                                <StageBadge stage={stage} />
+                                <StageBadge stage={parsed.stage} parsed={parsed} />
                                 {row.priority !== "normal" && <Badge variant="outline">{row.priority === "high" ? "High priority" : "Low priority"}</Badge>}
                                 {row.owner && <Badge variant="outline">{row.owner === "user" ? "USER" : row.owner}</Badge>}
                               </span>
@@ -407,10 +384,11 @@ export function GoalsView() {
                     {task ? <>
                       <Badge variant="outline" className="font-mono">{task.id}</Badge>
                       <StateBadge task={task} />
-                      <StageBadge stage={parseTaskStage(task.next_action).stage} />
+                      <StageBadge stage={parsedDetail?.stage ?? null} parsed={parsedDetail ?? undefined} />
                       <Badge variant="outline">{task.priority} priority</Badge>
                       <Badge variant="outline">{task.owner === "user" ? "USER" : task.owner || "Unassigned"}</Badge>
                     </> : <Badge variant="secondary"><Tag /> Triage</Badge>}
+                    <Button size="icon" variant="ghost" className="ml-auto hidden size-9 min-[900px]:inline-flex" aria-label="Close task details" title="Close details" onClick={() => choose("")}><X /></Button>
                   </div>
                   <CardTitle className="text-lg [overflow-wrap:anywhere] sm:text-xl">{detail.heading}</CardTitle>
                 </CardHeader>
