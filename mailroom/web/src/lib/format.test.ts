@@ -1,14 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { Agent } from "./types";
+import type { Agent, BusEvent } from "./types";
 import type * as FormatModule from "./format";
 
-const { ACTIVE_MIN, IDLE_MIN, effectiveState, latestActivityTs } = (await import(
-  new URL("./format.ts", import.meta.url).href
-)) as typeof FormatModule;
+const {
+  ACTIVE_MIN,
+  IDLE_MIN,
+  MAX_FUTURE_SKEW_MS,
+  buildLastActivityMap,
+  effectiveState,
+  isFutureOutlier,
+  latestActivityTs,
+} = (await import(new URL("./format.ts", import.meta.url).href)) as typeof FormatModule;
 
 const NOW = Date.parse("2026-11-19T08:00:00Z");
 const minsAgo = (m: number) => new Date(NOW - m * 60000).toISOString();
+const msAhead = (ms: number) => new Date(NOW + ms).toISOString();
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
@@ -16,6 +23,18 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
     name: "Claude",
     kind: "permanent",
     state: "idle",
+    ...overrides,
+  };
+}
+
+function makeEvent(overrides: Partial<BusEvent> = {}): BusEvent {
+  return {
+    id: "e1",
+    ts: minsAgo(1),
+    type: "message",
+    from: "a1",
+    to: "muse",
+    body: "ok",
     ...overrides,
   };
 }
@@ -57,24 +76,71 @@ test("regression: a1 with state=idle and recent activity shows active; a3.symg12
   assert.deepEqual(visibleSubs.map((s) => s.id), ["a1"]);
 });
 
-test("latestActivityTs picks newest across last_active, latestBusTs, and updated_at", () => {
+test("latestActivityTs uses last_active and latestBusTs only, ignoring updated_at", () => {
   const a = makeAgent({
     last_active: minsAgo(120),
-    updated_at: minsAgo(180),
+    updated_at: minsAgo(2),
   });
   const recentBus = minsAgo(5);
-  assert.equal(latestActivityTs(a, recentBus), recentBus);
+  assert.equal(latestActivityTs(a, recentBus, NOW), recentBus);
   assert.equal(effectiveState(a, recentBus, NOW), "active");
 
   const newerLastActive = minsAgo(10);
   const olderBus = minsAgo(45);
-  const b = makeAgent({ last_active: newerLastActive, updated_at: minsAgo(90) });
-  assert.equal(latestActivityTs(b, olderBus), newerLastActive);
+  const b = makeAgent({ last_active: newerLastActive, updated_at: minsAgo(1) });
+  assert.equal(latestActivityTs(b, olderBus, NOW), newerLastActive);
   assert.equal(effectiveState(b, olderBus, NOW), "active");
 
-  const fallbackOnly = makeAgent({ last_active: undefined, updated_at: minsAgo(25) });
-  assert.equal(latestActivityTs(fallbackOnly, null), fallbackOnly.updated_at);
-  assert.equal(effectiveState(fallbackOnly, null, NOW), "idle");
+  const registeredOnly = makeAgent({ last_active: undefined, updated_at: minsAgo(1) });
+  assert.equal(latestActivityTs(registeredOnly, null, NOW), null);
+  assert.equal(effectiveState(registeredOnly, null, NOW), "inactive");
+});
+
+test("future timestamp outliers beyond MAX_FUTURE_SKEW_MS are ignored while <=5s skew stays active", () => {
+  assert.equal(MAX_FUTURE_SKEW_MS, 5_000);
+  assert.equal(isFutureOutlier(NOW + 2_000, NOW), false);
+  assert.equal(isFutureOutlier(NOW + 5_000, NOW), false);
+  assert.equal(isFutureOutlier(NOW + 5_001, NOW), true);
+
+  // +24h future bus event outlier alongside 90m stale valid event -> inactive.
+  const staleValidTs = minsAgo(90);
+  const outlier24h = msAhead(24 * 60 * 60 * 1000);
+  const mapWithStale = buildLastActivityMap(
+    [
+      makeEvent({ id: "e1", from: "a2", ts: staleValidTs }),
+      makeEvent({ id: "e2", from: "a2", ts: outlier24h }),
+    ],
+    NOW,
+  );
+  assert.equal(mapWithStale.get("a2"), staleValidTs);
+  assert.equal(effectiveState(makeAgent({ id: "a2", last_active: undefined }), mapWithStale.get("a2"), NOW), "inactive");
+
+  // +24h bus outlier alongside 5m valid bus event -> selects 5m event -> active.
+  const valid5m = minsAgo(5);
+  const mapWithRecent = buildLastActivityMap(
+    [
+      makeEvent({ id: "e3", from: "a3", ts: outlier24h }),
+      makeEvent({ id: "e4", from: "a3", ts: valid5m }),
+    ],
+    NOW,
+  );
+  assert.equal(mapWithRecent.get("a3"), valid5m);
+  assert.equal(effectiveState(makeAgent({ id: "a3", last_active: minsAgo(120) }), mapWithRecent.get("a3"), NOW), "active");
+
+  // Direct +24h or +60s outlier in last_active or latestBusTs -> ignored -> inactive.
+  assert.equal(latestActivityTs(makeAgent({ last_active: outlier24h }), null, NOW), null);
+  assert.equal(effectiveState(makeAgent({ last_active: outlier24h }), null, NOW), "inactive");
+  const outlier60s = msAhead(60_000);
+  assert.equal(latestActivityTs(makeAgent({ last_active: outlier60s }), null, NOW), null);
+  assert.equal(effectiveState(makeAgent({ last_active: outlier60s }), null, NOW), "inactive");
+  assert.equal(effectiveState(makeAgent({ last_active: undefined }), outlier60s, NOW), "inactive");
+
+  // +2s NTP skew is accepted as active both directly and via buildLastActivityMap.
+  const skew2s = msAhead(2_000);
+  const mapSkew2s = buildLastActivityMap([makeEvent({ id: "e5", from: "a5", ts: skew2s })], NOW);
+  assert.equal(mapSkew2s.get("a5"), skew2s);
+  assert.equal(effectiveState(makeAgent({ id: "a5", last_active: skew2s }), null, NOW), "active");
+  assert.equal(effectiveState(makeAgent({ id: "a5", last_active: undefined }), mapSkew2s.get("a5"), NOW), "active");
 });
 
 test("retired and temporary agent lifecycle states stay intact", () => {

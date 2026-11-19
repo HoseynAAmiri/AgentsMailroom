@@ -1,4 +1,4 @@
-import type { Agent, MailTask, Presence } from "./types";
+import type { Agent, BusEvent, MailTask, Presence } from "./types";
 
 export function ageMin(ts?: string | null): number {
   if (!ts) return Infinity;
@@ -118,15 +118,35 @@ export function shortName(id: string, agents: Map<string, Agent>): string {
 
 export const ACTIVE_MIN = 15;
 export const IDLE_MIN = 60;
+export const MAX_FUTURE_SKEW_MS = 5_000;
 export const TEMP_LIFECYCLE_STATES = ["starting", "expired", "stopped", "finished", "failed"] as const;
 
-export function latestActivityTs(a: Agent, latestBusTs?: string | null): string | null {
+export function isFutureOutlier(ms: number, nowMs: number = Date.now()): boolean {
+  return ms - nowMs > MAX_FUTURE_SKEW_MS;
+}
+
+export function buildLastActivityMap(events: readonly BusEvent[], nowMs: number = Date.now()): Map<string, string> {
+  const m = new Map<string, string>();
+  const bestMs = new Map<string, number>();
+  for (const e of events) {
+    if (!e.from || e.from === "user" || !e.ts) continue;
+    const ms = Date.parse(e.ts);
+    if (!Number.isFinite(ms) || isFutureOutlier(ms, nowMs)) continue;
+    if (ms > (bestMs.get(e.from) ?? -Infinity)) {
+      bestMs.set(e.from, ms);
+      m.set(e.from, e.ts);
+    }
+  }
+  return m;
+}
+
+export function latestActivityTs(a: Agent, latestBusTs?: string | null, nowMs: number = Date.now()): string | null {
   let bestTs: string | null = null;
   let bestMs = -Infinity;
-  for (const ts of [a.last_active, latestBusTs, a.updated_at]) {
+  for (const ts of [a.last_active, latestBusTs]) {
     if (!ts) continue;
     const ms = Date.parse(ts);
-    if (Number.isFinite(ms) && ms > bestMs) {
+    if (Number.isFinite(ms) && !isFutureOutlier(ms, nowMs) && ms > bestMs) {
       bestMs = ms;
       bestTs = ts;
     }
@@ -134,15 +154,15 @@ export function latestActivityTs(a: Agent, latestBusTs?: string | null): string 
   return bestTs;
 }
 
-export function effectiveState(a: Agent, latestBusTs?: string | null, nowMs?: number): string {
+export function effectiveState(a: Agent, latestBusTs?: string | null, nowMs: number = Date.now()): string {
   if (a.retired) return "retired";
   if (a.kind === "temporary" && a.state && (TEMP_LIFECYCLE_STATES as readonly string[]).includes(a.state)) {
     return a.state;
   }
-  const last = latestActivityTs(a, latestBusTs);
+  const last = latestActivityTs(a, latestBusTs, nowMs);
   if (!last) return "inactive";
-  const age = ((nowMs ?? Date.now()) - Date.parse(last)) / 60000;
-  if (!Number.isFinite(age)) return "inactive";
+  const age = (nowMs - Date.parse(last)) / 60000;
+  if (!Number.isFinite(age) || age < -(MAX_FUTURE_SKEW_MS / 60000)) return "inactive";
   if (age < ACTIVE_MIN) return "active";
   if (age <= IDLE_MIN) return "idle";
   return "inactive";

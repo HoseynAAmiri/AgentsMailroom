@@ -16,7 +16,7 @@ import {
   type Thread,
 } from "@/lib/threads";
 import type { Agent, BusEvent, MailTaskIndex, Snapshot } from "@/lib/types";
-import { displayName } from "@/lib/format";
+import { buildLastActivityMap, displayName } from "@/lib/format";
 
 export type View = "goals" | "mail" | "team" | "machine" | "files";
 export type ComposeMode = "new" | "reply" | "replyAll" | "forward";
@@ -194,20 +194,7 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
   }, [setView]);
 
   const agents = useMemo(() => new Map((snap?.agents ?? []).map((a) => [a.id, a])), [snap?.agents]);
-  const lastActivity = useMemo(() => {
-    const m = new Map<string, string>();
-    const bestMs = new Map<string, number>();
-    for (const e of events) {
-      if (!e.from || e.from === "user" || !e.ts) continue;
-      const ms = Date.parse(e.ts);
-      if (!Number.isFinite(ms)) continue;
-      if (ms > (bestMs.get(e.from) ?? -Infinity)) {
-        bestMs.set(e.from, ms);
-        m.set(e.from, e.ts);
-      }
-    }
-    return m;
-  }, [events]);
+  const lastActivity = useMemo(() => buildLastActivityMap(events), [events]);
   const ms = useMemo(() => mailState(snap?.user_state), [snap?.user_state]);
   const threads = useMemo(() => buildThreads(events, snap?.tasks ?? [], mailTasks), [events, snap?.tasks, mailTasks]);
   const threadByEvent = useMemo(() => {

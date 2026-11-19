@@ -185,7 +185,7 @@ function AgentCard({ a, subs, onEdit, onConnect, onSession }: { a: Agent; subs: 
   const { snap, startCompose, setView, setFolder, refresh, lastActivity } = useMailroom();
   const now = useNow(30000);
   const [showRole, setShowRole] = useState(false);
-  const lastAct = latestActivityTs(a, lastActivity.get(a.id));
+  const lastAct = latestActivityTs(a, lastActivity.get(a.id), now);
   const st = effectiveState(a, lastActivity.get(a.id), now);
   const procs = (snap?.processes ?? []).filter((p) => p.agent === a.id);
   const links = (snap?.links ?? []).filter((l) => l.a === a.id || l.b === a.id).map((l) => (l.a === a.id ? l.b : l.a));
