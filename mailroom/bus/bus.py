@@ -1281,7 +1281,7 @@ Rules:
 - Find your past messages without changing unread state:
   {bus} search --agent {aid} --q "<keywords>" --task-id <id>
   The keyword and task filters are optional. Use --event-id to look up a known message.
-- Check who is on the team, their roles, availability, and allowed routes with {bus} team.
+- Check who is on the team, their roles, live state/activity estimates, and configured registry routes with {bus} team (available/reachable reflect the last {LISTENING_MIN} min of inbox or status activity; a persistent watcher refreshes listening while idle/waiting and does not establish spare capacity).
 - Read project task state with `{bus} todo list` and `{bus} todo show <task id>`. Use `todo update <task id> --agent {aid} --revision <current revision>` with --state or --next-action for explicit task edits.
 - Report progress to the team with {bus} status --agent {aid} --state working --summary "Short progress update". For a USER decision, post --type human.needed --to user with the task ID, question and available options.
 - After handling messages: {bus} mark-seen --agent {aid} --event-id <last handled event id>
@@ -1747,7 +1747,13 @@ def member_availability(agent: dict[str, Any], pres: dict[str, Any], now: dateti
 
 
 def team_roster(*, include_all: bool = False, available_only: bool = False) -> dict[str, Any]:
-    """List team members with role, machine, live state/availability, and allowed peer routes."""
+    """List team members with role, machine, live state/activity estimates, and registry routes.
+
+    `available` and `reachable` are 15-minute (`LISTENING_MIN`) activity estimates derived from
+    recent inbox/status timestamps; a persistent watcher can refresh `listening` while an agent
+    is idle or waiting, so neither establishes spare capacity. `links` and `peers` describe
+    configured registry routes while live `state` is reported separately.
+    """
     data = load_agents()
     links = get_links(data)
     machines = {m["id"]: m.get("label") or m["id"] for m in get_machines(data)}
@@ -2371,9 +2377,19 @@ def build_parser() -> argparse.ArgumentParser:
     links = sub.add_parser("links", help="Print who may message whom")
     links.set_defaults(func=cmd_links)
 
-    team = sub.add_parser("team", help="List team members, roles, live availability, and allowed routes")
+    team = sub.add_parser(
+        "team",
+        help="List team members, roles, activity estimates, and configured registry routes",
+        description=(
+            "List registered team members with role, machine, live state, activity estimates, and "
+            "configured registry routes (`links`/`peers`, with `state` reported separately). "
+            f"`available` and `reachable` are {LISTENING_MIN}-minute activity estimates; a persistent "
+            "watcher can refresh `listening` while an agent is `idle` or `waiting`, so this does not "
+            "establish spare capacity."
+        ),
+    )
     team.add_argument("--all", action="store_true", help="include retired and ended agents")
-    team.add_argument("--available", action="store_true", help="only list currently available agents")
+    team.add_argument("--available", action="store_true", help="only list agents estimated available (15-min window)")
     team.set_defaults(func=cmd_team)
 
     serve = sub.add_parser("serve", help="Serve dashboard + API")

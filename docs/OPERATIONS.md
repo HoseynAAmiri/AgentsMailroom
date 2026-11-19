@@ -176,7 +176,10 @@ curl -fsS http://127.0.0.1:8766/api/agents/worker/instructions |
 # On the Mailroom host, get the same prompt directly from the local CLI.
 python3 mailroom/bus/bus.py instructions --agent worker
 
-# Inspect team members, roles, live availability, and allowed routes (`GET /api/team` or CLI).
+# Inspect team members, roles, live state/activity estimates, and configured registry routes (`GET /api/team`).
+# Note: `available` and `reachable` are 15-minute activity estimates; a persistent watcher can refresh
+# `listening` while an agent is `idle` or `waiting`, so neither establishes spare capacity. `links` and
+# `peers` report configured registry routes while live `state` is shown separately.
 python3 mailroom/bus/bus_client.py team
 python3 mailroom/bus/bus_client.py team --available
 

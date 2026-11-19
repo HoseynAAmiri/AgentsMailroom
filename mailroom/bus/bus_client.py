@@ -2,7 +2,7 @@
 """HTTP client for the agent bus, for agents on another machine (stdlib only).
 
 Same commands as bus.py, talking to the bus server instead of the files:
-  python3 bus_client.py team [--available] [--all]
+  python3 bus_client.py team [--available] [--all]  (15-min activity estimate + registry routes; not spare capacity)
   python3 bus_client.py inbox --agent worker
   python3 bus_client.py search --agent worker --q "keywords" [--task-id R1]
   python3 bus_client.py post --from worker --to coordinator --body "..." [--cc reviewer] [--in-reply-to e123] [--task-id R1] [--ref file:...]
@@ -125,9 +125,19 @@ def main(argv=None):
     st.add_argument("--state", required=True, choices=["working", "idle", "waiting", "failed", "offline"])
     st.add_argument("--summary", required=True)
     st.add_argument("--task-id")
-    team = sub.add_parser("team", help="List team members, roles, availability, and allowed routes")
+    team = sub.add_parser(
+        "team",
+        help="List team members, roles, activity estimates, and configured registry routes",
+        description=(
+            "Query GET /api/team for registered team members, roles, live `state`, activity estimates, "
+            "and configured registry routes (`links`/`peers`, with `state` reported separately). "
+            "`available` and `reachable` are 15-minute activity estimates; a persistent watcher can "
+            "refresh `listening` while an agent is `idle` or `waiting`, so this does not establish "
+            "spare capacity."
+        ),
+    )
     team.add_argument("--all", action="store_true", help="include retired and ended agents")
-    team.add_argument("--available", action="store_true", help="only list currently available agents")
+    team.add_argument("--available", action="store_true", help="only list agents estimated available (15-min window)")
     a = p.parse_args(argv)
 
     if a.cmd == "todo":
