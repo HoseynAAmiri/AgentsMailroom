@@ -70,6 +70,23 @@ def logical_file(rel: str) -> tuple[Path, Path]:
     if rel.startswith(ATTACH_REF_PREFIX):
         return ATTACH_DIR / rel[len(ATTACH_REF_PREFIX):], ATTACH_DIR
     return REPO_DIR / rel, REPO_DIR
+
+
+def viewable_path(path: Path, root: Path) -> bool:
+    """Allow named attachments and workspace files outside private runtime state."""
+    try:
+        resolved = path.resolve()
+        base = root.resolve()
+        if not resolved.is_relative_to(base):
+            return False
+        rel = resolved.relative_to(base)
+    except (ValueError, OSError):
+        return False
+    if any(part.startswith(".") for part in rel.parts):
+        return False
+    return base == ATTACH_DIR.resolve() or not resolved.is_relative_to(STORE_DIR.resolve())
+
+
 AGENTS_PATH = BUS_DIR / "agents.json"
 EVENTS_PATH = BUS_DIR / "events.jsonl"
 SEEN_DIR = BUS_DIR / ".seen"
@@ -86,7 +103,10 @@ def todo_store():
     # and is written into the store, never into the main checkout.
     status = Path(os.environ.get("BUS_GOALS_STATUS") or COORD_DIR / "status" / "GOALS_STATUS.md")
     status.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    return TodoStore(root / "tasks.sqlite3", APP_DIR / "docs" / "GOALS.md", status)
+    roadmap = REPO_DIR / "docs" / "GOALS.md"
+    if not roadmap.is_file() and (APP_DIR / "docs" / "GOALS.md").is_file():
+        roadmap = APP_DIR / "docs" / "GOALS.md"
+    return TodoStore(root / "tasks.sqlite3", roadmap, status)
 
 
 def todo_last_event() -> int:
@@ -118,8 +138,8 @@ def todo_mutation(values, *, admin: bool):
         if Path(path).suffix.lower() not in TEXT_EXT and Path(path).suffix.lower() not in MIME:
             raise TodoError("Use a file format supported by the Mailroom viewer")
         target, root = logical_file(path)
-        if not target.resolve().is_relative_to(root):
-            raise TodoError("File is outside the repository")
+        if not viewable_path(target, root):
+            raise TodoError("Use a workspace file or a Mailroom attachment")
         values = {**values, "path": path}
     store = todo_store()
     if not store.initialized():
@@ -154,7 +174,7 @@ def todo_documents(window: int):
                      and child != "GOALS_STATUS.md" for path in (Path(directory) / child,))
     for path, label, root in paths:
         try:
-            if not path.resolve().is_relative_to(root):
+            if not viewable_path(path, root):
                 continue
             stat = path.stat()
             task = todo_file_tag(path, stat.st_mtime_ns, stat.st_size) if path.suffix.lower() == ".md" else None
@@ -956,6 +976,8 @@ class AttachmentIndex:
                     continue
                 path = Path(directory) / name
                 if path.suffix.lower() not in TEXT_EXT and path.suffix.lower() not in MIME:
+                    continue
+                if not viewable_path(path, self.path):
                     continue
                 try:
                     st = path.stat()
@@ -1966,9 +1988,14 @@ class BusHandler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def send_attachment(self, rel: str) -> None:
+        parts = [p for p in rel.split("/") if p]
+        if not parts or any(p.startswith(".") for p in parts):
+            self._send_json(404, {"error": "no such attachment"})
+            return
         try:
-            f = (ATTACH_DIR / rel).resolve()
-            f.relative_to(ATTACH_DIR)
+            f = ATTACH_DIR.joinpath(*parts).resolve()
+            if not viewable_path(f, ATTACH_DIR):
+                raise ValueError
         except (ValueError, OSError):
             self._send_json(404, {"error": "no such attachment"})
             return
@@ -1985,9 +2012,7 @@ class BusHandler(SimpleHTTPRequestHandler):
             return
         try:
             file = REPO_DIR.joinpath(*parts).resolve()
-            file.relative_to(REPO_DIR)
-            # Symlinks may resolve to non-hidden paths under the private data store.
-            if file.is_relative_to(STORE_DIR) or any(part.startswith(".") for part in file.relative_to(REPO_DIR).parts):
+            if not viewable_path(file, REPO_DIR):
                 raise ValueError
         except (ValueError, OSError):
             self._send_json(404, {"error": "no such file"})
