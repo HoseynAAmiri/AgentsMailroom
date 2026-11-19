@@ -125,6 +125,13 @@ export function isFutureOutlier(ms: number, nowMs: number = Date.now()): boolean
   return ms - nowMs > MAX_FUTURE_SKEW_MS;
 }
 
+export function resolveActivityNow(tickNowMs: number, snapshotReceivedAtMs?: number | null): number {
+  if (snapshotReceivedAtMs != null && Number.isFinite(snapshotReceivedAtMs)) {
+    return Math.max(tickNowMs, snapshotReceivedAtMs);
+  }
+  return tickNowMs;
+}
+
 export function buildLastActivityMap(events: readonly BusEvent[], nowMs: number = Date.now()): Map<string, string> {
   const m = new Map<string, string>();
   const bestMs = new Map<string, number>();

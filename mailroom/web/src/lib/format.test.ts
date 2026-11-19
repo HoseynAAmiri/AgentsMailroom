@@ -11,6 +11,7 @@ const {
   effectiveState,
   isFutureOutlier,
   latestActivityTs,
+  resolveActivityNow,
 } = (await import(new URL("./format.ts", import.meta.url).href)) as typeof FormatModule;
 
 const NOW = Date.parse("2026-11-19T08:00:00Z");
@@ -153,4 +154,44 @@ test("retired and temporary agent lifecycle states stay intact", () => {
   assert.equal(effectiveState(activeTemp, null, NOW), "active");
   const idleTemp = makeAgent({ id: "t3", kind: "temporary", state: "working", last_active: minsAgo(30) });
   assert.equal(effectiveState(idleTemp, null, NOW), "idle");
+});
+
+test("e2506/e2510: snapshot arrival advances shared evaluation clock across events between timer ticks", () => {
+  // Stale timer tick (10s or 25s behind wall clock) when fresh snapshot arrives at NOW with a 1s-old event/last_active.
+  const tick10sStale = NOW - 10_000;
+  const tick25sStale = NOW - 25_000;
+  const recvAt = NOW;
+  const freshEventTs = new Date(NOW - 1_000).toISOString();
+  const freshAgent = makeAgent({ id: "a3", last_active: undefined });
+  const ev = makeEvent({ id: "e10", from: "a3", ts: freshEventTs });
+
+  // Under raw stale timer tick alone, a 1s-old event looks +9s / +24s in the future and is wrongly dropped.
+  assert.equal(buildLastActivityMap([ev], tick10sStale).get("a3"), undefined);
+  assert.equal(effectiveState(freshAgent, freshEventTs, tick10sStale), "inactive");
+  assert.equal(effectiveState(freshAgent, freshEventTs, tick25sStale), "inactive");
+
+  // Advancing evaluation clock on snapshot receipt unifies selection and state to active.
+  for (const staleTick of [tick10sStale, tick25sStale]) {
+    const evalNow = resolveActivityNow(staleTick, recvAt);
+    assert.equal(evalNow, recvAt);
+    const map = buildLastActivityMap([ev], evalNow);
+    assert.equal(map.get("a3"), freshEventTs);
+    assert.equal(latestActivityTs(freshAgent, map.get("a3"), evalNow), freshEventTs);
+    assert.equal(effectiveState(freshAgent, map.get("a3"), evalNow), "active");
+    assert.equal(effectiveState(makeAgent({ id: "a3", last_active: freshEventTs }), null, evalNow), "active");
+  }
+
+  // Once timer ticks forward (+20m), resolveActivityNow advances past recvAt so agent transitions to idle.
+  const tick20mLater = NOW + 20 * 60_000;
+  const laterNow = resolveActivityNow(tick20mLater, recvAt);
+  assert.equal(laterNow, tick20mLater);
+  assert.equal(effectiveState(freshAgent, buildLastActivityMap([ev], laterNow).get("a3"), laterNow), "idle");
+
+  // True future outliers (+60s, +24h beyond recvAt) remain rejected under resolveActivityNow.
+  const outlier60s = msAhead(60_000);
+  const outlier24h = msAhead(24 * 60 * 60 * 1000);
+  const evalNow = resolveActivityNow(tick10sStale, recvAt);
+  const outlierMap = buildLastActivityMap([makeEvent({ id: "e11", from: "a2", ts: outlier24h })], evalNow);
+  assert.equal(outlierMap.get("a2"), undefined);
+  assert.equal(effectiveState(makeAgent({ id: "a2", last_active: outlier60s }), null, evalNow), "inactive");
 });

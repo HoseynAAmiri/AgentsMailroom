@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { api, type OutgoingMessage } from "@/lib/api";
-import { useBus, useLocalStorage } from "@/hooks/use-bus";
+import { useBus, useLocalStorage, useNow } from "@/hooks/use-bus";
 import { pushBack, useBackLayer, useHistoryRoot } from "@/hooks/use-back-layer";
 import {
   buildThreads,
@@ -16,7 +16,7 @@ import {
   type Thread,
 } from "@/lib/threads";
 import type { Agent, BusEvent, MailTaskIndex, Snapshot } from "@/lib/types";
-import { buildLastActivityMap, displayName } from "@/lib/format";
+import { buildLastActivityMap, displayName, resolveActivityNow } from "@/lib/format";
 
 export type View = "goals" | "mail" | "team" | "machine" | "files";
 export type ComposeMode = "new" | "reply" | "replyAll" | "forward";
@@ -43,6 +43,7 @@ interface Ctx {
   registerViewRefresh: (view: View, handler: () => Promise<void>) => () => void;
   agents: Map<string, Agent>;
   lastActivity: Map<string, string>;
+  activityNow: number;
   avatarColors: Record<string, string>;
   setAvatarColor: (agentId: string, colorId: string | null) => void;
   ms: MailState;
@@ -120,7 +121,9 @@ const MAILBOX_FEEDBACK = {
 } as const;
 
 export function MailroomProvider({ children }: { children: ReactNode }) {
-  const { snap, events, connected, error, refresh, setUserState } = useBus();
+  const { snap, events, snapshotReceivedAt, connected, error, refresh, setUserState } = useBus();
+  const tickNow = useNow(30000);
+  const activityNow = resolveActivityNow(tickNow, snapshotReceivedAt);
   const [view, setViewRaw] = useLocalStorage<View>("mr-view", "mail");
   const [mailTasks, setMailTasks] = useState<MailTaskIndex>();
   const refreshMailTasks = useCallback(async () => {
@@ -194,7 +197,7 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
   }, [setView]);
 
   const agents = useMemo(() => new Map((snap?.agents ?? []).map((a) => [a.id, a])), [snap?.agents]);
-  const lastActivity = useMemo(() => buildLastActivityMap(events), [events]);
+  const lastActivity = useMemo(() => buildLastActivityMap(events, activityNow), [events, activityNow]);
   const ms = useMemo(() => mailState(snap?.user_state), [snap?.user_state]);
   const threads = useMemo(() => buildThreads(events, snap?.tasks ?? [], mailTasks), [events, snap?.tasks, mailTasks]);
   const threadByEvent = useMemo(() => {
@@ -408,6 +411,7 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
     registerViewRefresh,
     agents,
     lastActivity,
+    activityNow,
     avatarColors,
     setAvatarColor,
     ms,

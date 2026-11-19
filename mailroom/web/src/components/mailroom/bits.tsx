@@ -27,9 +27,9 @@ export function Tip({ label, children, className, side }: { label: string; child
 }
 
 export function AgentAvatar({ id, size = "md", agent, showState }: { id: string; size?: "sm" | "md" | "lg"; agent?: Agent; showState?: boolean }) {
-  const { avatarColors, lastActivity } = useMailroom();
+  const { avatarColors, lastActivity, activityNow } = useMailroom();
   const dim = size === "sm" ? "size-6 text-[10px]" : size === "lg" ? "size-10 text-sm" : "size-8 text-xs";
-  const st = agent ? effectiveState(agent, lastActivity.get(agent.id)) : null;
+  const st = agent ? effectiveState(agent, lastActivity.get(agent.id), activityNow) : null;
   return (
     <span className="relative inline-flex shrink-0">
       <span
