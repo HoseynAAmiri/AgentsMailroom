@@ -7,10 +7,13 @@ const {
   ACTIVE_MIN,
   IDLE_MIN,
   MAX_FUTURE_SKEW_MS,
+  TASK_STAGES,
+  TASK_STAGE_STYLE,
   buildLastActivityMap,
   effectiveState,
   isFutureOutlier,
   latestActivityTs,
+  parseTaskStage,
   resolveActivityNow,
 } = (await import(new URL("./format.ts", import.meta.url).href)) as typeof FormatModule;
 
@@ -194,4 +197,42 @@ test("e2506/e2510: snapshot arrival advances shared evaluation clock across even
   const outlierMap = buildLastActivityMap([makeEvent({ id: "e11", from: "a2", ts: outlier24h })], evalNow);
   assert.equal(outlierMap.get("a2"), undefined);
   assert.equal(effectiveState(makeAgent({ id: "a2", last_active: outlier60s }), null, evalNow), "inactive");
+});
+
+test("parseTaskStage extracts valid D38 [Stage] prefixes and preserves trailing text", () => {
+  assert.deepEqual([...TASK_STAGES], ["Inbox", "Assign", "Stage", "Run", "Review", "Done", "Result"]);
+  for (const stage of TASK_STAGES) {
+    assert.equal(TASK_STAGE_STYLE[stage].label, stage);
+    assert.ok(TASK_STAGE_STYLE[stage].cls.length > 0);
+    assert.deepEqual(parseTaskStage(`[${stage}] Next step for ${stage}`), {
+      stage,
+      text: `Next step for ${stage}`,
+    });
+  }
+
+  // Case-insensitive normalization & surrounding whitespace
+  assert.deepEqual(parseTaskStage("  [review]   Wait for a2  "), {
+    stage: "Review",
+    text: "Wait for a2",
+  });
+  assert.deepEqual(parseTaskStage("[ STAGE ] Draft case definition"), {
+    stage: "Stage",
+    text: "Draft case definition",
+  });
+
+  // Stage-only input and multiline bodies
+  assert.deepEqual(parseTaskStage("[Result]"), { stage: "Result", text: "" });
+  assert.deepEqual(parseTaskStage("[Stage] Line 1\nLine 2"), {
+    stage: "Stage",
+    text: "Line 1\nLine 2",
+  });
+
+  // Unknown prefixes and plain/empty values keep text and return null stage
+  assert.deepEqual(parseTaskStage("[WIP] draft"), { stage: null, text: "[WIP] draft" });
+  assert.deepEqual(parseTaskStage("[] empty"), { stage: null, text: "[] empty" });
+  assert.deepEqual(parseTaskStage("Plain next action"), { stage: null, text: "Plain next action" });
+  assert.deepEqual(parseTaskStage("   "), { stage: null, text: "" });
+  assert.deepEqual(parseTaskStage(""), { stage: null, text: "" });
+  assert.deepEqual(parseTaskStage(null), { stage: null, text: "" });
+  assert.deepEqual(parseTaskStage(undefined), { stage: null, text: "" });
 });

@@ -208,6 +208,43 @@ export const GOAL_STATE_STYLE: Record<MailTask["state"], { label: string; cls: s
   done: { label: "Done", cls: "border border-border bg-transparent text-muted-foreground" },
 };
 
+export const TASK_STAGES = [
+  "Inbox",
+  "Assign",
+  "Stage",
+  "Run",
+  "Review",
+  "Done",
+  "Result",
+] as const;
+
+export type TaskStage = (typeof TASK_STAGES)[number];
+
+export const TASK_STAGE_STYLE: Record<TaskStage, { label: TaskStage; cls: string }> = {
+  Inbox: { label: "Inbox", cls: "border-zinc-400/40 bg-zinc-500/10 text-zinc-700 dark:text-zinc-300" },
+  Assign: { label: "Assign", cls: "border-indigo-500/35 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300" },
+  Stage: { label: "Stage", cls: "border-cyan-500/35 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300" },
+  Run: { label: "Run", cls: "border-sky-500/40 bg-sky-500/15 text-sky-700 dark:text-sky-300" },
+  Review: { label: "Review", cls: "border-violet-500/40 bg-violet-500/15 text-violet-700 dark:text-violet-300" },
+  Done: { label: "Done", cls: "border-teal-500/35 bg-teal-500/10 text-teal-700 dark:text-teal-300" },
+  Result: { label: "Result", cls: "border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" },
+};
+
+const TASK_STAGE_BY_LOWER = new Map<string, TaskStage>(
+  TASK_STAGES.map((stage) => [stage.toLowerCase(), stage]),
+);
+const TASK_STAGE_PREFIX_RE = /^\s*\[([^\]]+)\](?:\s*([\s\S]*))?$/;
+
+/** Parse the D38 `[Stage]` prefix from `next_action`, preserving trailing text. */
+export function parseTaskStage(nextAction?: string | null): { stage: TaskStage | null; text: string } {
+  if (!nextAction) return { stage: null, text: "" };
+  const match = TASK_STAGE_PREFIX_RE.exec(nextAction);
+  if (!match) return { stage: null, text: nextAction.trim() };
+  const stage = TASK_STAGE_BY_LOWER.get(match[1].trim().toLowerCase()) ?? null;
+  if (!stage) return { stage: null, text: nextAction.trim() };
+  return { stage, text: (match[2] ?? "").trim() };
+}
+
 export function plainTaskTitle(title: string) {
   return title.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/[`*]/g, "");
 }

@@ -18,7 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SearchableSelect, type SearchOption } from "@/components/ui/searchable-select";
 import { useBackLayer } from "@/hooks/use-back-layer";
 import { api, fileHref } from "@/lib/api";
-import { GOAL_STATE_STYLE, plainTaskTitle } from "@/lib/format";
+import { GOAL_STATE_STYLE, TASK_STAGES, TASK_STAGE_STYLE, parseTaskStage, plainTaskTitle, type TaskStage } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useMailroom } from "@/components/mailroom/context";
 
@@ -47,6 +47,7 @@ type Edit = { kind: "goal" | "task"; id?: string; revision?: number; fields: Rec
 const textClass = "text-sm text-muted-foreground";
 const pageSize = 30;
 const stateOptions = Object.entries(GOAL_STATE_STYLE).map(([value, { label }]) => ({ value, label }));
+const stageOptions = TASK_STAGES.map((value) => ({ value, label: value }));
 const priorities = ["high", "normal", "low"].map((value) => ({ value, label: value[0].toUpperCase() + value.slice(1) }));
 
 function titleParts(title: string) {
@@ -60,6 +61,20 @@ function StateBadge({ task }: { task: Task }) {
     {task.state === "done" && <CircleCheck data-icon="inline-start" aria-hidden="true" />}
     {task.decision ? "USER decision" : GOAL_STATE_STYLE[task.state].label}
   </Badge>;
+}
+
+function StageBadge({ stage }: { stage: TaskStage | null }) {
+  if (!stage) return null;
+  return (
+    <Badge
+      variant="outline"
+      data-stage={stage}
+      title={`Stage: ${stage}`}
+      className={TASK_STAGE_STYLE[stage].cls}
+    >
+      {TASK_STAGE_STYLE[stage].label}
+    </Badge>
+  );
 }
 
 async function request<T>(url: string, body?: unknown): Promise<T> {
@@ -79,6 +94,7 @@ export function GoalsView() {
   const [error, setError] = useState("");
   const [goalFilter, setGoalFilter] = useState("");
   const [stateFilter, setStateFilter] = useState("");
+  const [stageFilter, setStageFilter] = useState("");
   const [ownerFilter, setOwnerFilter] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
   const [decisionsOnly, setDecisionsOnly] = useState(false);
@@ -147,13 +163,15 @@ export function GoalsView() {
   const task = data?.tasks.find((row) => row.id === selected);
   const rows = useMemo(() => data?.tasks.filter((row) => {
     const query = search.trim().toLowerCase();
+    const { stage } = parseTaskStage(row.next_action);
     return (!goalFilter || row.goal_id === goalFilter)
       && (!decisionsOnly || !!row.decision)
       && (!stateFilter || row.state === stateFilter)
+      && (!stageFilter || (stageFilter === "-" ? !stage : stage === stageFilter))
       && (!ownerFilter || row.owner === (ownerFilter === "-" ? "" : ownerFilter))
       && (!priorityFilter || row.priority === priorityFilter)
       && (!query || [row.id, row.title, row.notes, row.next_action].some((value) => value.toLowerCase().includes(query)));
-  }) ?? [], [data, goalFilter, stateFilter, ownerFilter, priorityFilter, search, decisionsOnly]);
+  }) ?? [], [data, goalFilter, stateFilter, stageFilter, ownerFilter, priorityFilter, search, decisionsOnly]);
   const people = useMemo(() => [...new Set(["user", ...agents.keys(), ...(data?.tasks.map((row) => row.owner).filter(Boolean) ?? [])])],
     [agents, data?.tasks]);
   const goalOptions = useMemo(() => data?.goals.map((row) => ({ value: row.id, label: `${row.id} · ${plainTaskTitle(row.title)}` })) ?? [], [data?.goals]);
@@ -229,11 +247,11 @@ export function GoalsView() {
   const currentRevision = edit?.id && (edit.kind === "goal"
     ? data?.goals.find((row) => row.id === edit.id)?.revision
     : data?.tasks.find((row) => row.id === edit.id)?.revision);
-  const orderAvailable = !stateFilter && !ownerFilter && !priorityFilter && !search.trim() && !decisionsOnly;
+  const orderAvailable = !stateFilter && !stageFilter && !ownerFilter && !priorityFilter && !search.trim() && !decisionsOnly;
   const groups = data?.goals.filter((row) => !goalFilter || goalFilter === row.id) ?? [];
   const detailOpen = !!selected;
   const showOverview = !goalFilter && !showAll && orderAvailable;
-  const groupFilter = JSON.stringify([goalFilter, stateFilter, ownerFilter, priorityFilter, search.trim(), decisionsOnly]);
+  const groupFilter = JSON.stringify([goalFilter, stateFilter, stageFilter, ownerFilter, priorityFilter, search.trim(), decisionsOnly]);
   const visibleGroupIds = [...new Set(rows.map((row) => row.goal_id))];
   const openGroups = expandedGroups?.filter === groupFilter
     ? expandedGroups.ids : goalFilter ? [goalFilter] : orderAvailable ? visibleGroupIds.slice(0, 1) : visibleGroupIds;
@@ -241,7 +259,7 @@ export function GoalsView() {
   const withChoice = (label: string, options: SearchOption[]): SearchOption[] => [{ value: "", label }, ...options];
 
   function backToOverview() {
-    setGoalFilter(""); setStateFilter(""); setOwnerFilter(""); setPriorityFilter(""); setDecisionsOnly(false); setShowAll(false);
+    setGoalFilter(""); setStateFilter(""); setStageFilter(""); setOwnerFilter(""); setPriorityFilter(""); setDecisionsOnly(false); setShowAll(false);
   }
 
   return (
@@ -268,7 +286,7 @@ export function GoalsView() {
                 </Button>
                 <Button size="sm" variant={decisionsOnly ? "secondary" : "ghost"} className="h-10 touch:h-11" aria-pressed={decisionsOnly}
                   onClick={() => {
-                    setGoalFilter(""); setStateFilter(""); setOwnerFilter(""); setPriorityFilter("");
+                    setGoalFilter(""); setStateFilter(""); setStageFilter(""); setOwnerFilter(""); setPriorityFilter("");
                     setDecisionsOnly((value) => !value);
                   }}>
                   <TriangleAlert /> USER decisions <Badge variant="outline">{data.tasks.filter((row) => row.decision).length}</Badge>
@@ -286,9 +304,11 @@ export function GoalsView() {
                     assign recent mail and files that still need a task.</>}
                 </CardContent>
               </Card>}
-              {showFilters && <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4 min-[900px]:grid-cols-2" aria-label="Task filters">
+              {showFilters && <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 min-[900px]:grid-cols-2" aria-label="Task filters">
                 <SearchableSelect label="Filter by goal" value={goalFilter} onChange={setGoalFilter} options={withChoice("All goals", goalOptions)} />
                 <SearchableSelect label="Filter by state" value={stateFilter} onChange={setStateFilter} options={withChoice("Any state", stateOptions)} />
+                <SearchableSelect label="Filter by stage" value={stageFilter} onChange={setStageFilter}
+                  options={withChoice("Any stage", [...stageOptions, { value: "-", label: "No stage" }])} />
                 <SearchableSelect label="Filter by owner" value={ownerFilter} onChange={setOwnerFilter}
                   options={withChoice("Any owner", [{ value: "-", label: "Unassigned" }, ...personOptions])} />
                 <SearchableSelect label="Filter by priority" value={priorityFilter} onChange={setPriorityFilter} options={withChoice("Any priority", priorities)} />
@@ -342,7 +362,9 @@ export function GoalsView() {
                     </div>
                     <AccordionContent>
                     <ul className="space-y-2">
-                      {items.map((row) => <li key={row.id}>
+                      {items.map((row) => {
+                        const { stage } = parseTaskStage(row.next_action);
+                        return <li key={row.id}>
                         <Card size="sm" className={cn(
                           "gap-0 py-0 shadow-none",
                           row.state === "done" && "bg-muted/35 ring-foreground/5",
@@ -354,6 +376,7 @@ export function GoalsView() {
                               <span className="flex flex-wrap items-center gap-1.5">
                                 <Badge variant="ghost" className="px-0 font-mono text-muted-foreground">{row.id}</Badge>
                                 <StateBadge task={row} />
+                                <StageBadge stage={stage} />
                                 {row.priority !== "normal" && <Badge variant="outline">{row.priority === "high" ? "High priority" : "Low priority"}</Badge>}
                                 {row.owner && <Badge variant="outline">{row.owner === "user" ? "USER" : row.owner}</Badge>}
                               </span>
@@ -365,7 +388,8 @@ export function GoalsView() {
                             <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                           </Button>
                         </Card>
-                      </li>)}
+                      </li>;
+                      })}
                     </ul>
                     </AccordionContent>
                   </AccordionItem>;
@@ -383,6 +407,7 @@ export function GoalsView() {
                     {task ? <>
                       <Badge variant="outline" className="font-mono">{task.id}</Badge>
                       <StateBadge task={task} />
+                      <StageBadge stage={parseTaskStage(task.next_action).stage} />
                       <Badge variant="outline">{task.priority} priority</Badge>
                       <Badge variant="outline">{task.owner === "user" ? "USER" : task.owner || "Unassigned"}</Badge>
                     </> : <Badge variant="secondary"><Tag /> Triage</Badge>}
