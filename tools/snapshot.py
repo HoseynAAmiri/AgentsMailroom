@@ -136,8 +136,16 @@ def resolve_git_dir(work_tree: Path, explicit: str | None = None) -> Path:
     return default_snapshot_git_dir(work_tree)
 
 
+def _base_git_env() -> dict[str, str]:
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
+
+
 def _git_env(git_dir: Path, work_tree: Path) -> dict[str, str]:
-    env = dict(os.environ)
+    env = _base_git_env()
     env["GIT_DIR"] = str(git_dir)
     env["GIT_WORK_TREE"] = str(work_tree)
     env["GIT_INDEX_FILE"] = str(git_dir / "index")
@@ -145,10 +153,9 @@ def _git_env(git_dir: Path, work_tree: Path) -> dict[str, str]:
 
 
 def _git_bare(git_dir: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
-    env = {k: v for k, v in os.environ.items() if k not in {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"}}
     return subprocess.run(
         ["git", f"--git-dir={git_dir}", *args],
-        env=env,
+        env=_base_git_env(),
         check=check,
         capture_output=True,
         text=True,
@@ -181,6 +188,10 @@ def _source_git_targets(work_tree: Path) -> list[Path]:
     return targets
 
 
+def _overlaps(a: Path, b: Path) -> bool:
+    return a == b or a.is_relative_to(b) or b.is_relative_to(a)
+
+
 def _check_no_remotes(git_dir: Path, label: str) -> None:
     if not (git_dir / "HEAD").is_file():
         raise SnapshotError(f"{label} is not a git repository (missing HEAD): {git_dir}")
@@ -195,13 +206,72 @@ def _check_no_remotes(git_dir: Path, label: str) -> None:
         raise SnapshotError(f"{label} contains refs/remotes entries: {git_dir}")
 
 
+def _resolve_git_path(git_dir: Path, raw: str) -> Path:
+    p = Path(raw)
+    return (p if p.is_absolute() else git_dir / p).resolve()
+
+
+def _validate_git_paths_private(work_tree: Path, git_dir: Path) -> None:
+    if git_dir.is_symlink():
+        raise SnapshotError(f"refusing symlinked snapshot git-dir: {git_dir}")
+    gd = git_dir.resolve()
+    wt = work_tree.resolve()
+    if (gd / "commondir").exists() or (gd / "commondir").is_symlink():
+        raise SnapshotError(f"refusing snapshot git-dir with commondir indirection: {gd}")
+    for rel in ("objects", "index", "info", "info/exclude", "hooks", "hooks/pre-commit", "hooks/pre-push"):
+        if (gd / rel).is_symlink():
+            raise SnapshotError(f"refusing symlink inside snapshot git-dir ({rel}): {gd}")
+    alt = gd / "objects" / "info" / "alternates"
+    if alt.exists() or alt.is_symlink():
+        raise SnapshotError(f"refusing snapshot objects/info/alternates indirection: {gd}")
+
+    rp = _git_bare(
+        gd,
+        "rev-parse",
+        "--git-dir",
+        "--git-common-dir",
+        "--git-path",
+        "objects",
+        "--git-path",
+        "index",
+        "--git-path",
+        "info/exclude",
+        "--git-path",
+        "hooks",
+        check=False,
+    )
+    lines = rp.stdout.splitlines() if rp.returncode == 0 else []
+    if len(lines) != 6:
+        raise SnapshotError(f"unable to verify private git paths for {gd}: {rp.stderr.strip()}")
+    r_gd, r_common, r_obj, r_idx, r_excl, r_hooks = (_resolve_git_path(gd, line) for line in lines)
+
+    if r_gd != gd or r_common != gd:
+        raise SnapshotError(f"refusing snapshot git-dir with shared common/git dir ({r_gd}, {r_common} != {gd})")
+    if r_obj != (gd / "objects").resolve() or not r_obj.is_relative_to(gd):
+        raise SnapshotError(f"refusing snapshot objects dir outside {gd}: {r_obj}")
+    if r_idx != (gd / "index").resolve() or not r_idx.is_relative_to(gd):
+        raise SnapshotError(f"refusing snapshot index outside {gd}: {r_idx}")
+    if r_excl != (gd / "info" / "exclude").resolve() or not (gd / "info" / "exclude").is_file():
+        raise SnapshotError(f"refusing missing or redirected info/exclude in {gd}: {r_excl}")
+    if r_hooks != (gd / "hooks").resolve() or not r_hooks.is_relative_to(gd):
+        raise SnapshotError(f"refusing snapshot hooks dir outside {gd}: {r_hooks}")
+
+    forbidden = [wt, *_source_git_targets(wt)]
+    for candidate in (r_gd, r_common, r_obj, r_idx, r_excl, r_hooks):
+        for target in forbidden:
+            if _overlaps(candidate, target):
+                raise SnapshotError(f"refusing private git path {candidate} overlapping {target}")
+
+
 def validate_git_dir_location(work_tree: Path, git_dir: Path) -> None:
+    if git_dir.is_symlink():
+        raise SnapshotError(f"refusing symlinked snapshot git-dir: {git_dir}")
     wt = work_tree.resolve()
     gd = git_dir.resolve()
     if gd == wt or wt.is_relative_to(gd):
         raise SnapshotError(f"refusing snapshot git-dir inside/equal to work-tree root: {gd}")
     for src in _source_git_targets(wt):
-        if gd == src or gd.is_relative_to(src) or src.is_relative_to(gd):
+        if _overlaps(gd, src):
             raise SnapshotError(f"refusing snapshot git-dir overlapping work-tree .git ({src}): {gd}")
     if gd.parent == wt and gd.name == ".git":
         raise SnapshotError(f"refusing to target work-tree .git directly: {gd}")
@@ -215,6 +285,10 @@ def validate_snapshot_git_dir(work_tree: Path, git_dir: Path, *, allow_missing: 
     if not gd.is_dir():
         raise SnapshotError(f"snapshot git-dir does not exist (run --init or --migrate-from first): {gd}")
     _check_no_remotes(gd, "snapshot git-dir")
+    _validate_git_paths_private(work_tree, gd)
+    wt_cfg = _git_bare(gd, "config", "--get-all", "core.worktree", check=False)
+    if wt_cfg.returncode == 0 and wt_cfg.stdout.strip():
+        raise SnapshotError(f"refusing snapshot git-dir with core.worktree configured: {gd}")
     marker = _git_bare(gd, "config", "--get", SNAPSHOT_MARKER_KEY, check=False)
     if marker.returncode != 0 or marker.stdout.strip().lower() != "true":
         raise SnapshotError(f"refusing git-dir missing {SNAPSHOT_MARKER_KEY}=true: {gd}")
@@ -266,6 +340,7 @@ def init_snapshot_repo(work_tree: Path, git_dir: Path) -> None:
     gd.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         ["git", "init", "--bare", "--initial-branch=main", str(gd)],
+        env=_base_git_env(),
         check=True,
         capture_output=True,
         text=True,
@@ -283,6 +358,8 @@ def migrate_snapshot_repo(work_tree: Path, git_dir: Path, old_git_dir: Path) -> 
         raise SnapshotError(f"refusing overlapping migrate source {old} and target {gd}")
     if not old.is_dir():
         raise SnapshotError(f"source snapshot git-dir does not exist: {old}")
+    if (old / "commondir").exists() or (old / "objects").is_symlink() or (old / "objects" / "info" / "alternates").exists() or (old / "index").is_symlink():
+        raise SnapshotError(f"refusing migration source git-dir with shared/symlinked internals: {old}")
     _check_no_remotes(old, "migration source git-dir")
     gd.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(old, gd, symlinks=True)
@@ -421,6 +498,9 @@ def allowed_paths(work_tree: Path, git_dir: Path) -> list[str]:
             env=_git_env(git_dir, Path(empty_wt)),
             capture_output=True,
         )
+    if r.returncode not in (0, 1):
+        detail = r.stderr.decode("utf-8", errors="replace").strip()
+        raise SnapshotError(f"git check-ignore failed (exit {r.returncode}): {detail}")
     ignored = {x for x in r.stdout.decode("utf-8").split("\0") if x}
     return [p for p in paths if p not in ignored]
 
@@ -485,16 +565,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"exported {n} event projections")
             return 0
         validate_snapshot_git_dir(work_tree, git_dir)
+        n = export_events(work_tree)
+        export_todo(work_tree)
+        print(f"exported {n} event projections")
+
+        paths = allowed_paths(work_tree, git_dir)
+        reviewed = reviewed_attachments(work_tree)
     except SnapshotError as exc:
         print(f"snapshot error: {exc}", file=sys.stderr)
         return 2
 
-    n = export_events(work_tree)
-    export_todo(work_tree)
-    print(f"exported {n} event projections")
-
-    paths = allowed_paths(work_tree, git_dir)
-    reviewed = reviewed_attachments(work_tree)
     if a.dry_run:
         print("\n".join(paths + reviewed))
         return 0

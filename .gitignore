@@ -1,7 +1,7 @@
-# Coordination store: ALLOW-LIST. Everything is ignored unless re-included below.
-# Local history only: this repository has no remote and is never pushed.
-# Add paths with tools/snapshot.py only (explicit allow-list, never `git add -A`).
-# Size/secret/raw-state limits are enforced by .githooks/pre-commit (install: tools/install_hooks.sh).
+# Agents-mailroom public source repository: ALLOW-LIST.
+# Everything is ignored unless re-included below. Private store data (bus/, todo/, status/,
+# archive/, exports/, review/, attachments/, .mailroom-data/) stays ignored here; private store
+# snapshots use an isolated GIT_DIR with its own exclude rules via tools/snapshot.py.
 /*
 !/.gitignore
 !/.size-allowlist
@@ -9,28 +9,11 @@
 !/.githooks/
 !/tools/
 
-# --- reviewed exports only (tools/snapshot.py): event metadata projection, task dump ---
-!/exports/
-/exports/**
-!/exports/**/
-!/exports/events/*.jsonl
-!/exports/todo/tasks.safe.json
-# bus/ (raw events, cursors, sessions, registry, USER state) is never tracked
-
-
-# --- attachments: only paths listed in review/attachments.allow (snapshot.py adds them; hook checks) ---
-!/attachments/
-/attachments/**
-!/attachments/**/
-!/review/
-
-# archive/ stays on disk and in the rollback checkpoint only (not tracked)
-
-# --- mailroom app source (no builds, no node_modules) ---
+# --- mailroom app source (no builds, no node_modules, no local wrappers) ---
 !/mailroom/
 /mailroom/**
 !/mailroom/**/
-!/mailroom/*.sh
+!/mailroom/run.sh
 !/mailroom/bus/*.py
 !/mailroom/web/src/**
 !/mailroom/web/*.json
@@ -62,9 +45,6 @@ id_ed25519*
 *token*
 *secret*
 *.log
-
-# --- kept on disk only: repository snapshots and data files over 1 MiB ---
-/attachments/**/clean_build/
 
 # Private runtime state for this checkout.
 /.mailroom-data/
