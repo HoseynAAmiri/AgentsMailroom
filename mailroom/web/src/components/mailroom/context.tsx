@@ -41,6 +41,8 @@ interface Ctx {
   refreshActiveView: () => Promise<void>;
   registerViewRefresh: (view: View, handler: () => Promise<void>) => () => void;
   agents: Map<string, Agent>;
+  avatarColors: Record<string, string>;
+  setAvatarColor: (agentId: string, colorId: string | null) => void;
   ms: MailState;
   threads: Thread[];
   threadByEvent: Map<string, Thread>;
@@ -114,6 +116,15 @@ const MAILBOX_FEEDBACK = {
 export function MailroomProvider({ children }: { children: ReactNode }) {
   const { snap, events, connected, error, refresh, setUserState } = useBus();
   const [view, setViewRaw] = useLocalStorage<View>("mr-view", "mail");
+  const [avatarColors, setAvatarColors] = useLocalStorage<Record<string, string>>("mr-avatar-colors", {});
+  const setAvatarColor = (agentId: string, colorId: string | null) => {
+    setAvatarColors((current) => {
+      const next = { ...current };
+      if (colorId === null) delete next[agentId];
+      else next[agentId] = colorId;
+      return next;
+    });
+  };
   const viewRefresh = useRef<Partial<Record<View, () => Promise<void>>>>({});
   const registerViewRefresh = useCallback((target: View, handler: () => Promise<void>) => {
     viewRefresh.current[target] = handler;
@@ -364,6 +375,8 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
     refreshActiveView,
     registerViewRefresh,
     agents,
+    avatarColors,
+    setAvatarColor,
     ms,
     threads,
     threadByEvent,

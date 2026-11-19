@@ -1,16 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Archive, ArchiveRestore, ArrowLeftRight, ChevronDown, Copy, Loader2, Mail, MessagesSquare, Pencil, Plug, Save, Square, SquareTerminal, Timer, UserPlus } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeftRight, Check, ChevronDown, Copy, Loader2, Mail, MessagesSquare, Palette, Pencil, Plug, Save, Shuffle, Square, SquareTerminal, Timer, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
-import { ago, CONN_STYLE, connection, countdown, effectiveState, gib } from "@/lib/format";
+import { ago, AVATAR_COLORS, avatarColorId, avatarColorValue, CONN_STYLE, connection, countdown, effectiveState, gib } from "@/lib/format";
 import { useNow } from "@/hooks/use-bus";
 import { useCanHover } from "@/hooks/use-mobile";
 import type { Agent, Link } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverDescription, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
@@ -24,6 +25,60 @@ import { SessionDialog } from "./session-dialog";
 import { MachinesPanel, machineLinkOk } from "@/components/machine/machines-panel";
 
 const ENDED = ["expired", "stopped", "finished", "failed"];
+
+function AvatarColorPicker({ agent }: { agent: Agent }) {
+  const { agents, avatarColors, setAvatarColor } = useMailroom();
+  const selected = avatarColors?.[agent.id];
+  const current = avatarColorId(agent.id, selected);
+  const randomize = () => {
+    const alternatives = AVATAR_COLORS.filter(({ id }) => id !== current);
+    const used = new Set(Array.from(agents.keys(), (id) => avatarColorId(id, avatarColors?.[id])));
+    const unused = alternatives.filter(({ id }) => !used.has(id));
+    const choices = unused.length ? unused : alternatives;
+    setAvatarColor(agent.id, choices[Math.floor(Math.random() * choices.length)].id);
+  };
+
+  return (
+    <Popover>
+      <PopoverTrigger
+        render={
+          <Button variant="ghost" size="icon-sm" className="touch:size-10" aria-label={`Change avatar color for ${agent.name}`} title="Change avatar color">
+            <Palette />
+          </Button>
+        }
+      />
+      <PopoverContent className="w-[min(21rem,calc(100vw-1.5rem))]" align="start">
+        <div className="flex items-center gap-2">
+          <AgentAvatar id={agent.id} size="sm" />
+          <PopoverTitle>Avatar color · {agent.name}</PopoverTitle>
+        </div>
+        <PopoverDescription className="text-xs">Saved in this browser.</PopoverDescription>
+        <div className="grid max-h-[min(40dvh,20rem)] grid-cols-10 gap-1 overflow-auto p-1" role="group" aria-label="Color palette">
+          {AVATAR_COLORS.map(({ id, label, value }) => (
+            <button
+              key={id}
+              type="button"
+              className="flex aspect-square items-center justify-center rounded-md text-white hover:ring-2 hover:ring-ring focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              style={{ backgroundColor: value }}
+              aria-label={label}
+              aria-pressed={current === id}
+              title={label}
+              onClick={() => setAvatarColor(agent.id, id)}
+            >
+              {current === id && <Check className="size-3.5" />}
+            </button>
+          ))}
+        </div>
+        <div className="flex justify-between">
+          <Button size="sm" variant="outline" onClick={randomize}><Shuffle /> Randomize</Button>
+          <Button size="sm" variant="ghost" disabled={!avatarColorValue(selected)} onClick={() => setAvatarColor(agent.id, null)}>
+            Reset to default
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 function IconBtn({ label, onClick, disabled, className, children }: { label: string; onClick: () => void; disabled?: boolean; className?: string; children: React.ReactNode }) {
   const canHover = useCanHover();
@@ -249,6 +304,7 @@ function AgentCard({ a, subs, onEdit, onConnect, onSession }: { a: Agent; subs: 
         >
           <MessagesSquare />
         </IconBtn>
+        <AvatarColorPicker agent={a} />
         {admin && (
           <>
             <IconBtn label="Edit role, CLI, session" onClick={onEdit} className="ml-auto">
@@ -546,6 +602,7 @@ function TempAgents({ onSession }: { onSession: (id: string) => void }) {
                           </IconBtn>
                         )}
                         <IconBtn label="Session" onClick={() => onSession(a.id)}><SquareTerminal /></IconBtn>
+                        <AvatarColorPicker agent={a} />
                         {live && admin && (
                           <IconBtn label="Stop agent" onClick={() => stop(a.id)} disabled={stopping === a.id} className="text-destructive hover:bg-destructive/10">
                             {stopping === a.id ? <Loader2 className="animate-spin" /> : <Square />}

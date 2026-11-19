@@ -40,27 +40,61 @@ export function countdown(ts?: string | null): string {
   return h ? `${h}h ${String(m).padStart(2, "0")}m` : `${m}:${String(sec).padStart(2, "0")}`;
 }
 
-const PALETTE = [
-  "bg-sky-600",
-  "bg-violet-600",
-  "bg-emerald-600",
-  "bg-amber-600",
-  "bg-rose-600",
-  "bg-teal-600",
-  "bg-indigo-600",
-  "bg-fuchsia-600",
-  "bg-lime-700",
-  "bg-amber-600",
-];
-const FIXED: Record<string, string> = { user: "bg-primary", a1: "bg-amber-600", a2: "bg-emerald-600", a3: "bg-violet-600", a5: "bg-sky-600", a4: "bg-zinc-500" };
+const FIXED: Record<string, string> = {
+  user: "bg-primary",
+  muse: "bg-blue-700",
+  a1: "bg-amber-600",
+  a2: "bg-emerald-600",
+  a3: "bg-violet-600",
+  a4: "bg-zinc-500",
+  a5: "bg-sky-600",
+};
 
-export function agentColor(id: string): string {
-  if (FIXED[id]) return FIXED[id];
+const COLOR_FAMILIES = [
+  ["Red", 20],
+  ["Orange", 45],
+  ["Ochre", 72],
+  ["Olive", 100],
+  ["Lime", 130],
+  ["Green", 158],
+  ["Teal", 184],
+  ["Cyan", 211],
+  ["Blue", 240],
+  ["Indigo", 267],
+  ["Violet", 294],
+  ["Rose", 330],
+] as const;
+
+export const AVATAR_COLORS = COLOR_FAMILIES.flatMap(([family, hue]) =>
+  Array.from({ length: 10 }, (_, index) => {
+    const shadeHue = hue + (index % 5 - 2) * 5;
+    const lightness = index < 5 ? 0.51 : 0.55;
+    const chroma = shadeHue >= 150 && shadeHue <= 225 ? 0.085 : 0.12;
+    return {
+      id: `${family.toLowerCase()}-${index + 1}`,
+      label: `${family} ${index + 1}`,
+      value: `oklch(${lightness} ${chroma} ${shadeHue})`,
+    };
+  }),
+);
+
+const AVATAR_COLOR_VALUES = new Map(AVATAR_COLORS.map(({ id, value }) => [id, value]));
+
+export function avatarColorValue(id: string | undefined) {
+  return id ? AVATAR_COLOR_VALUES.get(id) : undefined;
+}
+
+export function defaultAvatarClass(id: string) {
   const base = id.split(".")[0];
-  if (FIXED[base]) return FIXED[base];
-  let h = 0;
-  for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return PALETTE[h % PALETTE.length];
+  return Object.hasOwn(FIXED, base) ? FIXED[base] : undefined;
+}
+
+export function avatarColorId(id: string, selected?: string) {
+  if (avatarColorValue(selected)) return selected;
+  if (defaultAvatarClass(id)) return undefined;
+  let hash = 0;
+  for (const char of id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length].id;
 }
 
 export function initials(id: string): string {

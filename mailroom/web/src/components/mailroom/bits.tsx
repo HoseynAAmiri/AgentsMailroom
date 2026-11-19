@@ -3,7 +3,7 @@
 import { Fragment, type MouseEvent, type ReactNode } from "react";
 import { Bot, Code2, FileImage, FileText, FileType, GitCommit, Hash, Link2, MousePointer2, Orbit, Sparkles, Terminal, User } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { agentColor, effectiveState, initials, STATE_DOT } from "@/lib/format";
+import { avatarColorId, avatarColorValue, defaultAvatarClass, effectiveState, initials, STATE_DOT } from "@/lib/format";
 import { attachmentHref, fileHref, fileKind } from "@/lib/api";
 import type { Agent, Ref } from "@/lib/types";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -27,11 +27,15 @@ export function Tip({ label, children, className, side }: { label: string; child
 }
 
 export function AgentAvatar({ id, size = "md", agent, showState }: { id: string; size?: "sm" | "md" | "lg"; agent?: Agent; showState?: boolean }) {
+  const { avatarColors } = useMailroom();
   const dim = size === "sm" ? "size-6 text-[10px]" : size === "lg" ? "size-10 text-sm" : "size-8 text-xs";
   const st = agent ? effectiveState(agent) : null;
   return (
     <span className="relative inline-flex shrink-0">
-      <span className={cn("inline-flex items-center justify-center rounded-full font-semibold text-white", dim, agentColor(id))}>
+      <span
+        className={cn("inline-flex items-center justify-center rounded-full font-semibold text-white", dim, defaultAvatarClass(id))}
+        style={{ backgroundColor: avatarColorValue(avatarColorId(id, avatarColors?.[id])) }}
+      >
         {id === "user" ? <User className="size-[55%]" /> : initials(id)}
       </span>
       {showState && st && (
