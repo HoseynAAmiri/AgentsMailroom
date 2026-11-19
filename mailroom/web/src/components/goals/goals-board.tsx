@@ -225,7 +225,7 @@ function BoardCard({ task, parsed, selectedId, onSelect, onOpenFile }: BoardCard
       size="sm"
       data-task-card={task.id}
       className={cn(
-        "gap-0 py-0 shadow-xs transition-colors",
+        "shrink-0 gap-0 py-0 shadow-xs transition-colors",
         task.state === "done" && !isSelected && "bg-muted/35 ring-foreground/5",
         task.state === "blocked" && "border-l-2 border-l-amber-500",
         isSelected && "bg-primary/8 ring-primary/50",
@@ -391,7 +391,7 @@ export function GoalsBoard({ tasks, selectedId, onSelect, onOpenFile }: GoalsBoa
           <p className="px-0.5 text-[11px] text-amber-800 dark:text-amber-300">
             Unprefixed or malformed D38 [Stage] tag
           </p>
-          <div className="flex max-h-[min(70dvh,46rem)] flex-col gap-2 overflow-y-auto pr-0.5">
+          <div data-stage-scroll="unstaged" className="grid max-h-[min(70dvh,46rem)] auto-rows-max gap-2 overflow-y-auto pr-0.5">
             {unstaged.map(({ task, parsed }) => (
               <BoardCard
                 key={task.id}
@@ -432,7 +432,7 @@ export function GoalsBoard({ tasks, selectedId, onSelect, onOpenFile }: GoalsBoa
               </div>
             </header>
             {col.items.length > 0 ? (
-              <div className="flex max-h-[min(70dvh,46rem)] flex-col gap-2 overflow-y-auto pr-0.5">
+              <div data-stage-scroll={col.stage} className="grid max-h-[min(70dvh,46rem)] auto-rows-max gap-2 overflow-y-auto pr-0.5">
                 {col.items.map(({ task, parsed }) => (
                   <BoardCard
                     key={task.id}
