@@ -31,7 +31,7 @@ export function RecipientPicker({
   multiple?: boolean;
   exclude?: string[];
 }) {
-  const { agents } = useMailroom();
+  const { agents, lastActivity } = useMailroom();
   const options = useAddressable().filter((a) => !exclude.includes(a.id));
   const [open, setOpen] = useState(false);
 
@@ -97,7 +97,7 @@ export function RecipientPicker({
                         </div>
                         <div className="truncate text-xs text-muted-foreground">
                           {a.kind === "temporary" ? "temporary · " : ""}
-                          {a.role} · {effectiveState(a)}
+                          {a.role} · {effectiveState(a, lastActivity.get(a.id))}
                         </div>
                       </div>
                     </CommandItem>

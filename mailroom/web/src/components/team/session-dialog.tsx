@@ -11,11 +11,12 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useMailroom } from "@/components/mailroom/context";
 import { api } from "@/lib/api";
+import { effectiveState } from "@/lib/format";
 
 const terminalStates = ["expired", "stopped", "finished", "failed"];
 
 export function SessionDialog({ id, onClose }: { id: string; onClose: () => void }) {
-  const { snap, refresh, setFolder } = useMailroom();
+  const { snap, refresh, setFolder, lastActivity } = useMailroom();
   const agent = snap?.agents.find((entry) => entry.id === id);
   const admin = snap?.capabilities.admin;
   const stored = agent?.session_id ?? "";
@@ -82,7 +83,7 @@ export function SessionDialog({ id, onClose }: { id: string; onClose: () => void
           <Badge variant="outline">Machine {agent?.machine ?? "A"}</Badge>
           {cli && <Badge variant="outline">{cli.label}</Badge>}
           <Badge variant="secondary">{agent?.kind === "temporary" ? "Temporary" : "Permanent"}</Badge>
-          {agent?.state && <Badge variant="outline">{agent.state}</Badge>}
+          {agent && <Badge variant="outline">{effectiveState(agent, lastActivity.get(agent.id))}</Badge>}
           <Button size="sm" variant="ghost" className="ml-auto h-10 touch:h-11" onClick={() => { onClose(); setFolder(`agent:${id}`); }}>
             <Mail /> Mail
           </Button>

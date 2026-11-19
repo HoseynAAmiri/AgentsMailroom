@@ -5,7 +5,7 @@ import { Archive, ArchiveRestore, ArrowLeftRight, Check, ChevronDown, Copy, Load
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
-import { ago, AVATAR_COLORS, avatarColorId, avatarColorValue, CONN_STYLE, connection, countdown, effectiveState, gib } from "@/lib/format";
+import { ago, AVATAR_COLORS, avatarColorId, avatarColorValue, CONN_STYLE, connection, countdown, effectiveState, gib, latestActivityTs } from "@/lib/format";
 import { useNow } from "@/hooks/use-bus";
 import { useCanHover } from "@/hooks/use-mobile";
 import type { Agent, Link } from "@/lib/types";
@@ -182,9 +182,11 @@ function ConnBadge({ a }: { a: Agent }) {
 }
 
 function AgentCard({ a, subs, onEdit, onConnect, onSession }: { a: Agent; subs: Agent[]; onEdit: () => void; onConnect: () => void; onSession: () => void }) {
-  const { snap, startCompose, setView, setFolder, refresh } = useMailroom();
+  const { snap, startCompose, setView, setFolder, refresh, lastActivity } = useMailroom();
+  const now = useNow(30000);
   const [showRole, setShowRole] = useState(false);
-  const st = effectiveState(a);
+  const lastAct = latestActivityTs(a, lastActivity.get(a.id));
+  const st = effectiveState(a, lastActivity.get(a.id), now);
   const procs = (snap?.processes ?? []).filter((p) => p.agent === a.id);
   const links = (snap?.links ?? []).filter((l) => l.a === a.id || l.b === a.id).map((l) => (l.a === a.id ? l.b : l.a));
   const admin = !!snap?.capabilities.admin;
@@ -216,7 +218,7 @@ function AgentCard({ a, subs, onEdit, onConnect, onSession }: { a: Agent; subs: 
             · <span>machine {a.machine}</span>
           </div>
         </div>
-        <Tip label="From its last status post" side="left">
+        <Tip label={lastAct ? `From bus activity (last active ${ago(lastAct)})` : "From bus activity (no recent activity)"} side="left">
           <span className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs">
             <StateDot state={st} /> {st}
           </span>
@@ -278,13 +280,16 @@ function AgentCard({ a, subs, onEdit, onConnect, onSession }: { a: Agent; subs: 
       </dl>
       {subs.length > 0 && (
         <div className="mt-3 space-y-1 border-t pt-2">
-          {subs.map((s) => (
-            <div key={s.id} className="flex items-start gap-2 text-xs">
-              <StateDot state={effectiveState(s)} />
-              <span className="font-mono">{s.id}</span>
-              <span className="min-w-0 break-words text-muted-foreground" title={s.summary}>{s.summary}</span>
-            </div>
-          ))}
+          {subs.map((s) => {
+            const subSt = effectiveState(s, lastActivity.get(s.id), now);
+            return (
+              <div key={s.id} className="flex items-start gap-2 text-xs">
+                <StateDot state={subSt} />
+                <span className="font-mono">{s.id}</span>
+                <span className="min-w-0 break-words text-muted-foreground" title={s.summary}>{s.summary}</span>
+              </div>
+            );
+          })}
         </div>
       )}
       <div className="mt-auto flex flex-wrap gap-1 pt-3">
@@ -321,7 +326,8 @@ function AgentCard({ a, subs, onEdit, onConnect, onSession }: { a: Agent; subs: 
 }
 
 function HealthStrip() {
-  const { snap, openHuman, setFolder, setView } = useMailroom();
+  const { snap, openHuman, setFolder, setView, lastActivity } = useMailroom();
+  const now = useNow(30000);
   const agents = (snap?.agents ?? []).filter((a) => !a.id.includes(".") && !a.retired && !(a.kind === "temporary" && ENDED.includes(a.state ?? "")));
   const pres = snap?.presence ?? {};
   const conns = agents.map((a) =>
@@ -329,7 +335,7 @@ function HealthStrip() {
   );
   const listening = conns.filter((c) => c.level === "listening" || c.level === "watcher").length;
   const notReading = agents.filter((a, i) => conns[i].level === "backlog" || conns[i].level === "offline");
-  const working = agents.filter((a) => effectiveState(a) === "working").length;
+  const active = agents.filter((a) => effectiveState(a, lastActivity.get(a.id), now) === "active").length;
   const temps = agents.filter((a) => a.kind === "temporary").length;
   const mem = snap?.memory && "avail_gib" in snap.memory ? snap.memory : null;
   const tile = "rounded-xl border bg-card px-3 py-2.5 text-left sm:px-4 sm:py-3";
@@ -343,8 +349,8 @@ function HealthStrip() {
         </div>
       </div>
       <div className={tile}>
-        <div className="text-xs text-muted-foreground">Working now</div>
-        <div className="mt-1 text-2xl font-semibold tabular-nums">{working}</div>
+        <div className="text-xs text-muted-foreground">Active now</div>
+        <div className="mt-1 text-2xl font-semibold tabular-nums">{active}</div>
       </div>
       <button
         type="button"
@@ -486,8 +492,8 @@ function LinksEditor() {
 }
 
 function TempAgents({ onSession }: { onSession: (id: string) => void }) {
-  const { snap, refresh, setSummonOpen, startCompose, setView, setFolder } = useMailroom();
-  useNow(1000);
+  const { snap, refresh, setSummonOpen, startCompose, setView, setFolder, lastActivity } = useMailroom();
+  const now = useNow(1000);
   const [stopping, setStopping] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const temps = (snap?.agents ?? []).filter((a) => a.kind === "temporary").reverse();
@@ -587,9 +593,14 @@ function TempAgents({ onSession }: { onSession: (id: string) => void }) {
                     </TableCell>
                     <TableCell className="hidden text-xs md:table-cell">{gib(a.mem_peak_bytes)}</TableCell>
                     <TableCell className="hidden sm:table-cell">
-                      <span className="inline-flex items-center gap-1.5 text-xs">
-                        <StateDot state={a.state ?? "idle"} /> {a.state}
-                      </span>
+                      {(() => {
+                        const st = effectiveState(a, lastActivity.get(a.id), now);
+                        return (
+                          <span className="inline-flex items-center gap-1.5 text-xs">
+                            <StateDot state={st} /> {st}
+                          </span>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex flex-wrap justify-end gap-1">
@@ -622,7 +633,8 @@ function TempAgents({ onSession }: { onSession: (id: string) => void }) {
 }
 
 export function TeamView() {
-  const { snap } = useMailroom();
+  const { snap, lastActivity } = useMailroom();
+  const now = useNow(30000);
   const [editing, setEditing] = useState<Agent | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [connecting, setConnecting] = useState<Agent | null>(null);
@@ -664,7 +676,12 @@ export function TeamView() {
                 <AgentCard
                   key={a.id}
                   a={a}
-                  subs={agents.filter((s) => s.id.startsWith(`${a.id}.`) && s.state !== "offline")}
+                  subs={agents.filter(
+                    (s) =>
+                      s.id.startsWith(`${a.id}.`) &&
+                      !s.retired &&
+                      effectiveState(s, lastActivity.get(s.id), now) !== "inactive",
+                  )}
                   onEdit={() => {
                     setEditing(a);
                     setDialogOpen(true);
