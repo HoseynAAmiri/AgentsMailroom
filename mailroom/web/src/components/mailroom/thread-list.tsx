@@ -11,6 +11,7 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AgentAvatar, Pill } from "./bits";
 import { useMailroom } from "./context";
@@ -179,12 +180,11 @@ function ArchiveOlder() {
             Move read conversations to Archive. Flagged conversations, unfinished tasks, and requests awaiting you stay in place.
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <label className="flex items-center justify-between gap-3 text-sm">
-          Last activity
-          <select value={days} onChange={(e) => setDays(Number(e.target.value))} className="rounded-md border bg-background px-2 py-1.5">
-            {[30, 90, 180].map((n) => <option key={n} value={n}>Over {n} days ago</option>)}
-          </select>
-        </label>
+        <div className="flex items-center justify-between gap-3 text-sm">
+          <span>Last activity</span>
+          <SearchableSelect compact label="Last activity" value={String(days)} onChange={(value) => setDays(Number(value))}
+            options={[30, 90, 180].map((n) => ({ value: String(n), label: `Over ${n} days ago` }))} />
+        </div>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction disabled={!candidates.length} onClick={() => {

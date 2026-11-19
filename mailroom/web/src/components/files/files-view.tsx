@@ -10,12 +10,19 @@ import type { Attachment } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableSelect, type SearchOption } from "@/components/ui/searchable-select";
 import { Tip } from "@/components/mailroom/bits";
 import { useMailroom } from "@/components/mailroom/context";
-import { GoalSelect } from "@/components/goals/goal-select";
 
 type Kind = "image" | "pdf" | "data";
+type FileSort = "newest" | "oldest" | "name" | "size";
+
+const FILE_SORTS: SearchOption<FileSort>[] = [
+  { value: "newest", label: "Newest first", triggerLabel: "Newest" },
+  { value: "oldest", label: "Oldest first", triggerLabel: "Oldest" },
+  { value: "name", label: "By name", triggerLabel: "Name" },
+  { value: "size", label: "By size", triggerLabel: "Size" },
+];
 const FILE_PAGE_SIZE = 60;
 
 function icon(name: string) {
@@ -47,7 +54,7 @@ export function FilesView() {
   const [type, setType] = useState<"all" | Kind>("all");
   const [folder, setFolder] = useState("all");
   const [cited, setCited] = useState("all");
-  const [sort, setSort] = useState<"newest" | "oldest" | "name" | "size">("newest");
+  const [sort, setSort] = useState<FileSort>("newest");
 
   const [page, setPage] = useState({ filterKey: "", limit: FILE_PAGE_SIZE });
   const filterKey = JSON.stringify([search, type, folder, cited, sort]);
@@ -91,14 +98,8 @@ export function FilesView() {
     return out;
   }, [files, search, type, folder, cited, citedBy, sort]);
 
-  const selTrigger = "h-6 gap-1 rounded-lg px-2 text-xs";
-  const selValue = "max-w-36 truncate";
   const chip = (on: boolean) =>
     cn("rounded-full border px-2.5 py-0.5 text-xs", on ? "tool-active border-transparent" : "hover:bg-muted");
-
-  const folderLabel = folder === "all" ? "Folder" : folder.split("/").pop() || folder;
-  const sortLabel = sort === "newest" ? "Newest" : sort === "oldest" ? "Oldest" : sort === "name" ? "Name" : "Size";
-  const citedLabel = cited === "all" ? "Email" : cited;
 
   return (
     <div className="flex h-full flex-col">
@@ -119,49 +120,18 @@ export function FilesView() {
           ))}
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
-          <Select value={folder} onValueChange={(v) => setFolder((v as string) ?? "all")}>
-            <SelectTrigger size="sm" className={selTrigger} aria-label="Filter by folder">
-              <SelectValue>
-                <span className={selValue}>{folderLabel}</span>
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Any folder</SelectItem>
-              {folders.filter(Boolean).map((d) => (
-                <SelectItem key={d} value={d}>
-                  {d}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={cited} onValueChange={(v) => setCited((v as string) ?? "all")}>
-            <SelectTrigger size="sm" className={selTrigger} aria-label="Filter by citing email">
-              <SelectValue>
-                <span className={selValue}>{citedLabel}</span>
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Any email</SelectItem>
-              {citers.map((e) => (
-                <SelectItem key={e} value={e}>
-                  cited in {e}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={sort} onValueChange={(v) => setSort((v as typeof sort) ?? "newest")}>
-            <SelectTrigger size="sm" className={selTrigger} aria-label="Sort">
-              <SelectValue>
-                <span className={selValue}>{sortLabel}</span>
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="newest">Newest first</SelectItem>
-              <SelectItem value="oldest">Oldest first</SelectItem>
-              <SelectItem value="name">By name</SelectItem>
-              <SelectItem value="size">By size</SelectItem>
-            </SelectContent>
-          </Select>
+          <SearchableSelect compact label="Filter by folder" searchPlaceholder="Find a folder…"
+            value={folder} onChange={setFolder} options={[
+              { value: "all", label: "Any folder", triggerLabel: "Folder" },
+              ...folders.filter(Boolean).map((path) => ({ value: path, label: path, triggerLabel: path.split("/").pop() })),
+            ]} />
+          <SearchableSelect compact label="Filter by citing email" searchPlaceholder="Find an email by ID…"
+            value={cited} onChange={setCited} options={[
+              { value: "all", label: "Any email", triggerLabel: "Email" },
+              ...citers.map((id) => ({ value: id, label: `Cited in ${id}`, triggerLabel: id })),
+            ]} />
+          <SearchableSelect compact label="Sort" searchPlaceholder="Find a sort order…"
+            value={sort} onChange={setSort} options={FILE_SORTS} />
         </div>
       </div>
       <ScrollArea className="min-h-0 flex-1">
@@ -231,6 +201,7 @@ export function FilesView() {
           <p className="text-sm text-muted-foreground [overflow-wrap:anywhere]">{linkPath}</p>
           <form className="grid min-w-0 gap-3" onSubmit={async (event) => {
             event.preventDefault();
+            if (!linkTask || linkBusy) return;
             setLinkBusy(true);
             try {
               const result = await api.linkGoalFile(linkTask, linkPath);
@@ -240,8 +211,8 @@ export function FilesView() {
             } catch (cause) { toast.error(String(cause)); }
             finally { setLinkBusy(false); }
           }}>
-            <GoalSelect label="Task" value={linkTask} onChange={setLinkTask} options={[
-              { value: "", label: "Choose a task" },
+            <SearchableSelect label="Task" placeholder="Choose a task" searchPlaceholder="Find a task by ID or title…"
+              value={linkTask || null} onChange={setLinkTask} disabled={linkBusy} options={[
               ...linkChoices.map((item) => ({ value: item.id, label: `${item.id} · ${item.title}` })),
             ]} />
             <DialogFooter><Button type="submit" disabled={!linkTask || linkBusy}>Link file</Button></DialogFooter>

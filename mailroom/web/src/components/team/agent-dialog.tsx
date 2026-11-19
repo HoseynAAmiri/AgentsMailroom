@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Textarea } from "@/components/ui/textarea";
 import { useMailroom } from "@/components/mailroom/context";
 
@@ -23,7 +23,7 @@ export function AgentDialog({ open, onOpenChange, agent }: { open: boolean; onOp
   const isNew = !agent;
   const clis = snap?.clis ?? {};
   const roles = snap?.roles ?? {};
-  const cliItems = Object.fromEntries(Object.entries(clis).map(([k, v]) => [k, `${v.label} (${k})`]));
+  const cliItems = Object.entries(clis).map(([value, { label }]) => ({ value, label: `${label} (${value})` }));
 
   useEffect(() => {
     if (open) setForm(agent ? { ...EMPTY, ...agent } : { ...EMPTY, id: nextId(snap?.agents ?? []) });
@@ -78,18 +78,8 @@ export function AgentDialog({ open, onOpenChange, agent }: { open: boolean; onOp
           </div>
           <div className="space-y-1.5">
             <Label>CLI</Label>
-            <Select items={cliItems} value={form.cli ?? null} onValueChange={(v) => setForm((f) => ({ ...f, cli: (v as string) ?? undefined }))}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Choose" />
-              </SelectTrigger>
-              <SelectContent>
-                {Object.entries(cliItems).map(([k, label]) => (
-                  <SelectItem key={k} value={k}>
-                    {label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <SearchableSelect label="CLI" value={form.cli ?? null} options={cliItems}
+              onChange={(cli) => setForm((current) => ({ ...current, cli }))} />
           </div>
           <div className="space-y-1.5">
             <Label>Role label</Label>

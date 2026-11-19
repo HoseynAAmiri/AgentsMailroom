@@ -15,7 +15,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { GoalSelect, type GoalOption } from "./goal-select";
+import { SearchableSelect, type SearchOption } from "@/components/ui/searchable-select";
 import { useBackLayer } from "@/hooks/use-back-layer";
 import { api, fileHref } from "@/lib/api";
 import { GOAL_STATE_STYLE, plainTaskTitle } from "@/lib/format";
@@ -238,7 +238,7 @@ export function GoalsView() {
   const openGroups = expandedGroups?.filter === groupFilter
     ? expandedGroups.ids : goalFilter ? [goalFilter] : orderAvailable ? visibleGroupIds.slice(0, 1) : visibleGroupIds;
   const detail = task ? titleParts(task.title) : { heading: selected === "untagged" ? "Untagged" : "Task unavailable", rest: "" };
-  const withChoice = (label: string, options: GoalOption[]): GoalOption[] => [{ value: "", label }, ...options];
+  const withChoice = (label: string, options: SearchOption[]): SearchOption[] => [{ value: "", label }, ...options];
 
   function backToOverview() {
     setGoalFilter(""); setStateFilter(""); setOwnerFilter(""); setPriorityFilter(""); setDecisionsOnly(false); setShowAll(false);
@@ -287,11 +287,11 @@ export function GoalsView() {
                 </CardContent>
               </Card>}
               {showFilters && <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4 min-[900px]:grid-cols-2" aria-label="Task filters">
-                <GoalSelect label="Filter by goal" value={goalFilter} onChange={setGoalFilter} options={withChoice("All goals", goalOptions)} />
-                <GoalSelect label="Filter by state" value={stateFilter} onChange={setStateFilter} options={withChoice("Any state", stateOptions)} />
-                <GoalSelect label="Filter by owner" value={ownerFilter} onChange={setOwnerFilter}
+                <SearchableSelect label="Filter by goal" value={goalFilter} onChange={setGoalFilter} options={withChoice("All goals", goalOptions)} />
+                <SearchableSelect label="Filter by state" value={stateFilter} onChange={setStateFilter} options={withChoice("Any state", stateOptions)} />
+                <SearchableSelect label="Filter by owner" value={ownerFilter} onChange={setOwnerFilter}
                   options={withChoice("Any owner", [{ value: "-", label: "Unassigned" }, ...personOptions])} />
-                <GoalSelect label="Filter by priority" value={priorityFilter} onChange={setPriorityFilter} options={withChoice("Any priority", priorities)} />
+                <SearchableSelect label="Filter by priority" value={priorityFilter} onChange={setPriorityFilter} options={withChoice("Any priority", priorities)} />
               </div>}
               {showOverview ? <div className={cn("grid grid-cols-1 gap-3 sm:grid-cols-2", detailOpen ? "min-[900px]:grid-cols-1" : "xl:grid-cols-3")}>
                 {data.goals.map((group) => {
@@ -442,7 +442,7 @@ export function GoalsView() {
                         event.preventDefault();
                         void act({ action: "tag", event_id: tagId, id: tagTarget || null }, "Message tag saved").then((result) => { if (result) setTagId(""); });
                       }}>
-                        <GoalSelect label="Task tag" className="col-span-2" value={tagTarget} onChange={setTagTarget} options={withChoice("Clear tag", taskOptions)} />
+                        <SearchableSelect label="Task tag" className="col-span-2" value={tagTarget} onChange={setTagTarget} options={withChoice("Clear tag", taskOptions)} />
                         <Button size="sm" className="h-10 touch:h-11" variant="outline" type="button" onClick={() => setTagId("")}>Cancel</Button>
                         <Button type="submit" size="sm" className="h-10 touch:h-11" disabled={busy}>Save tag</Button>
                       </form>
@@ -505,7 +505,7 @@ export function GoalsView() {
                     </CardContent>
                   </Card> : <>
                     <p className={textClass}>Choose the task, then select Link beside a document.</p>
-                    <GoalSelect label="Task for untagged documents" value={linkTarget} onChange={setLinkTarget} options={withChoice("Choose a task", taskOptions)} />
+                    <SearchableSelect label="Task for untagged documents" value={linkTarget} onChange={setLinkTarget} options={withChoice("Choose a task", taskOptions)} />
                   </>}
                   {!evidence?.files.length && <Card size="sm">
                     <CardContent className={textClass}>{evidence
@@ -551,7 +551,7 @@ export function GoalsView() {
           <form className="space-y-3" onSubmit={submit}>
             {edit?.kind === "task" && !edit.id && <div className="grid gap-1">
               <span className="text-sm font-medium">Goal</span>
-              <GoalSelect label="Goal" value={field("goal_id")} onChange={(value) => change("goal_id", value)} options={goalOptions} />
+              <SearchableSelect label="Goal" value={field("goal_id")} onChange={(value) => change("goal_id", value)} options={goalOptions} />
             </div>}
             <label className="grid gap-1">Title
               {edit?.kind === "task" ? <Textarea required maxLength={800} rows={2} className="text-base sm:text-sm"
@@ -561,14 +561,14 @@ export function GoalsView() {
             {edit?.kind === "task" && <>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 <div className="grid min-w-0 gap-1"><span>State</span>
-                  <GoalSelect label="State" value={edit.fields.decision ? "blocked" : field("state")} options={stateOptions}
+                  <SearchableSelect label="State" value={edit.fields.decision ? "blocked" : field("state")} options={stateOptions}
                     disabled={!!edit.fields.decision} onChange={(value) => change("state", value)} />
                 </div>
                 <div className="grid min-w-0 gap-1"><span>Owner</span>
-                  <GoalSelect label="Owner" value={field("owner")} onChange={(value) => change("owner", value)} options={withChoice("Unassigned", personOptions)} />
+                  <SearchableSelect label="Owner" value={field("owner")} onChange={(value) => change("owner", value)} options={withChoice("Unassigned", personOptions)} />
                 </div>
                 <div className="grid min-w-0 gap-1"><span>Priority</span>
-                  <GoalSelect label="Priority" value={field("priority")} options={priorities} onChange={(value) => change("priority", value)} />
+                  <SearchableSelect label="Priority" value={field("priority")} options={priorities} onChange={(value) => change("priority", value)} />
                 </div>
               </div>
               <label className="flex min-h-11 cursor-pointer items-center gap-3">
