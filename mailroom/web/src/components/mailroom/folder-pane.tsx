@@ -18,6 +18,7 @@ function FolderRow({
   count,
   countKind = "unread",
   extra,
+  hoverIcon,
 }: {
   id: FolderId;
   icon?: typeof Inbox;
@@ -25,6 +26,7 @@ function FolderRow({
   count?: number;
   countKind?: "unread" | "total" | "alert";
   extra?: React.ReactNode;
+  hoverIcon?: React.ReactNode;
 }) {
   const { folder, setFolder } = useMailroom();
   const on = folder === id;
@@ -40,16 +42,26 @@ function FolderRow({
       {Icon && <Icon className={cn("size-4 shrink-0", !on && "text-muted-foreground")} />}
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {extra}
-      {!!count && (
-        <span
-          className={cn(
-            "ml-auto text-xs tabular-nums",
-            countKind === "unread" && "font-semibold text-primary",
-            countKind === "alert" && "rounded-full bg-amber-500 px-1.5 py-px font-semibold text-white",
-            countKind === "total" && "text-muted-foreground",
+      {(!!count || hoverIcon) && (
+        <span className="grid shrink-0 items-center justify-items-end">
+          {!!count && (
+            <span
+              className={cn(
+                "col-start-1 row-start-1 text-xs tabular-nums",
+                countKind === "unread" && "font-semibold text-primary",
+                countKind === "alert" && "rounded-full bg-amber-500 px-1.5 py-px font-semibold text-white",
+                countKind === "total" && "text-muted-foreground",
+                hoverIcon && "group-hover:opacity-0",
+              )}
+            >
+              {count}
+            </span>
           )}
-        >
-          {count}
+          {hoverIcon && (
+            <span aria-hidden="true" className="col-start-1 row-start-1 opacity-0 group-hover:opacity-100">
+              {hoverIcon}
+            </span>
+          )}
         </span>
       )}
     </button>
@@ -139,7 +151,7 @@ export function FolderPane() {
                 </span>
               }
               count={unreadForAgent(a.id)}
-              extra={<CliIcon cli={a.cli} className="text-muted-foreground opacity-0 group-hover:opacity-100" />}
+              hoverIcon={<CliIcon cli={a.cli} className="text-muted-foreground" />}
             />
           ))}
         </Section>
@@ -157,6 +169,8 @@ export function FolderPane() {
                     </span>
                   </span>
                 }
+                count={unreadForAgent(a.id)}
+                hoverIcon={<CliIcon cli={a.cli} className="text-muted-foreground" />}
                 extra={
                   <span className="font-mono text-[11px] tabular-nums text-sky-600 dark:text-sky-300">
                     {countdown(a.expires_at)}
