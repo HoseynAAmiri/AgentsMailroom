@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Archive, ArchiveRestore, ArrowLeft, ChevronDown, ChevronUp, ChevronsUpDown, Flag, Forward, Mail, MailOpen, MoreHorizontal, Reply, ReplyAll, RotateCcw, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { eventTaskId, matchSnippet, messageHits, visibleEvents } from "@/lib/threads";
@@ -184,13 +184,18 @@ export function ReadingPane() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thread?.key, focusEvent, search]);
 
+  const prevSearchRef = useRef(search);
+
   useEffect(() => {
     const q = search.trim();
+    const searchChanged = prevSearchRef.current !== search;
+    prevSearchRef.current = search;
     if (!thread || !q) return;
     const found = messageHits(visibleEvents(thread, folder, ms), q);
-    if (!found.length || (focusEvent && found.some((e) => e.id === focusEvent))) return;
+    if (!found.length) return;
+    // Preserve explicit event navigation (e.g. openEvent to a non-matching message) unless the query itself changed or no message is focused.
+    if (focusEvent && (!searchChanged || found.some((e) => e.id === focusEvent))) return;
     select(thread.key, { focus: found[found.length - 1].id, markRead: false });
-    // jump once when the query or conversation changes, not on every mailbox poll
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, thread?.key, focusEvent]);
 
@@ -232,6 +237,17 @@ export function ReadingPane() {
   const hits = query ? messageHits(evs, query) : [];
   const hitAt = focusEvent ? hits.findIndex((e) => e.id === focusEvent) : -1;
   const focusIndex = focusEvent ? evs.findIndex((e) => e.id === focusEvent) : -1;
+  const hitIndices = hits.map((h) => evs.findIndex((e) => e.id === h.id));
+  const prevHit = hitAt > 0
+    ? hits[hitAt - 1]
+    : hitAt < 0 && focusIndex >= 0
+      ? (hits[hitIndices.filter((idx) => idx < focusIndex).length - 1] ?? null)
+      : null;
+  const nextHit = hitAt >= 0 && hitAt < hits.length - 1
+    ? hits[hitAt + 1]
+    : hitAt < 0
+      ? (hits.find((_, k) => (focusIndex >= 0 ? hitIndices[k] > focusIndex : true)) ?? null)
+      : null;
   const initialStart = focusIndex >= 0 && focusIndex < evs.length - 6 ? Math.max(0, focusIndex - 3) : Math.max(0, evs.length - 6);
   const start = Math.max(0, initialStart - olderPages * 30);
   const end = Math.min(evs.length, initialStart + 6 + laterPages * 30);
@@ -309,17 +325,19 @@ export function ReadingPane() {
               <Button
                 variant="outline"
                 size="xs"
-                disabled={hitAt <= 0}
-                onClick={() => select(thread.key, { focus: hits[hitAt - 1].id, markRead: false })}
+                disabled={!prevHit}
+                onClick={() => prevHit && select(thread.key, { focus: prevHit.id, markRead: false })}
               >
                 <ChevronUp /> Earlier
               </Button>
-              <span className="tabular-nums text-muted-foreground">{(hitAt < 0 ? hits.length : hitAt + 1)} of {hits.length}</span>
+              <span className="tabular-nums text-muted-foreground">
+                {hitAt >= 0 ? `${hitAt + 1} of ${hits.length}` : `${hits.length} ${hits.length === 1 ? "match" : "matches"}`}
+              </span>
               <Button
                 variant="outline"
                 size="xs"
-                disabled={hitAt < 0 || hitAt >= hits.length - 1}
-                onClick={() => select(thread.key, { focus: hits[hitAt + 1].id, markRead: false })}
+                disabled={!nextHit}
+                onClick={() => nextHit && select(thread.key, { focus: nextHit.id, markRead: false })}
               >
                 Later <ChevronDown />
               </Button>

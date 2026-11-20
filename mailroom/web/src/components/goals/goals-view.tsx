@@ -593,7 +593,7 @@ export function GoalsView() {
                   label={progressLabel}
                 />
                 </div>
-                <div className="mb-3 grid grid-cols-5 gap-2" aria-label="Task filters">
+                <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5" aria-label="Task filters">
                   <SearchableSelect
                     label="Filter by goal"
                     value={activeGoal}
