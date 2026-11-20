@@ -22,6 +22,7 @@ const {
   parseTaskStage,
   priorityRank,
   resolveActivityNow,
+  resolveTaskFilesFolder,
   sortTasksByPriority,
   summarizeTaskProgress,
 } = (await import(new URL("./format.ts", import.meta.url).href)) as typeof FormatModule;
@@ -508,4 +509,33 @@ test("summarizeTaskProgress counts canonical [Done] completion only", () => {
     donePct: 0,
     doneWidthPct: 0,
   });
+});
+
+test("resolveTaskFilesFolder picks owned task folder first and falls back to goal folder", () => {
+  assert.equal(
+    resolveTaskFilesFolder({
+      id: "G1.1",
+      goal_id: "G1",
+      links: [
+        "docs/goals-and-tasks/G1/g1_1_ibamr_examples_and_first_checks/context.md",
+        "docs/goals-and-tasks/G1/g1_1_ibamr_examples_and_first_checks/dossier.md",
+      ],
+    })?.folder,
+    "docs/goals-and-tasks/G1/g1_1_ibamr_examples_and_first_checks",
+  );
+  const unlinked = resolveTaskFilesFolder({ id: "G1.4", goal_id: "G1", links: [] });
+  assert.equal(unlinked?.folder, "docs/goals-and-tasks/G1");
+  assert.equal(unlinked?.label, "G1");
+  assert.equal(
+    resolveTaskFilesFolder({
+      id: "G8.3",
+      goal_id: "G8",
+      links: [
+        "docs/goals-and-tasks/G8/g8_3_contrast_runs/context.md",
+        "docs/goals-and-tasks/G3/g3_11_stiff_baseline/dossier.md",
+      ],
+    })?.folder,
+    "docs/goals-and-tasks/G8/g8_3_contrast_runs",
+  );
+  assert.equal(resolveTaskFilesFolder({ id: "invalid", goal_id: "", links: [] }), null);
 });

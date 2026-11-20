@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Activity, ArrowDown, ArrowLeft, ArrowUp, ArrowUpToLine, ChevronRight, CircleCheck, Columns3, FileText, Flag, Link2, ListChecks, ListFilter, MessageSquare, MoreHorizontal, Plus, Tag, Target, TriangleAlert, Upload, X } from "lucide-react";
+import { Activity, ArrowDown, ArrowLeft, ArrowUp, ArrowUpToLine, ChevronRight, CircleCheck, Columns3, FileText, Flag, FolderOpen, Link2, ListChecks, ListFilter, MessageSquare, MoreHorizontal, Plus, Tag, Target, TriangleAlert, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,7 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SearchableSelect, type SearchOption } from "@/components/ui/searchable-select";
 import { useBackLayer } from "@/hooks/use-back-layer";
 import { api, fileHref } from "@/lib/api";
-import { GOAL_STATE_STYLE, PRIORITY_STYLE, TASK_STAGES, extractTaskDocLinks, isTaskInProgress, isTaskReadyNext, parseTaskStage, plainTaskTitle, sortTasksByPriority, summarizeTaskProgress, type TaskDocFolder, type TaskProgressSummary } from "@/lib/format";
+import { GOAL_STATE_STYLE, PRIORITY_STYLE, TASK_STAGES, extractTaskDocLinks, isTaskInProgress, isTaskReadyNext, parseTaskStage, plainTaskTitle, resolveTaskFilesFolder, sortTasksByPriority, summarizeTaskProgress, type TaskDocFolder, type TaskProgressSummary } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useMailroom } from "@/components/mailroom/context";
 import { DecisionBadge, GoalsBoard, PriorityFlagControl, StageBadge, StateBadge, shouldHideStateBadge, titleParts, type GoalSummary as Goal, type GoalTask as Task, type TaskPriority } from "@/components/goals/goals-board";
@@ -50,16 +50,43 @@ function TaskProgressBar({
   summary,
   label,
   compact = false,
+  inline = false,
   className,
   dataAttr,
 }: {
   summary: TaskProgressSummary;
   label: string;
   compact?: boolean;
+  inline?: boolean;
   className?: string;
   dataAttr?: Record<string, string>;
 }) {
   const tooltip = `${summary.done} of ${summary.total} done (${summary.donePct}%)`;
+  if (inline) {
+    return (
+      <div {...dataAttr} className={cn("ml-auto flex shrink-0 items-center gap-1.5", className)}>
+        <div
+          role="progressbar"
+          aria-label={label}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={summary.donePct}
+          title={tooltip}
+          className="relative h-2 w-16 overflow-hidden rounded-full bg-muted min-[1360px]:w-28"
+        >
+          {summary.doneWidthPct > 0 && (
+            <div
+              className="h-full bg-emerald-500 transition-all"
+              style={{ width: `${summary.doneWidthPct}%` }}
+            />
+          )}
+        </div>
+        <span className="whitespace-nowrap text-[11px] font-medium text-emerald-700 tabular-nums dark:text-emerald-300 min-[1360px]:text-xs">
+          {summary.done} of {summary.total} done
+        </span>
+      </div>
+    );
+  }
   return (
     <div {...dataAttr} className={cn("flex flex-wrap items-center gap-x-3 gap-y-1.5", className)}>
       <div
@@ -98,6 +125,7 @@ interface TaskRowCardProps {
   busy?: boolean;
   onSelect: (id: string) => void;
   onChangePriority?: (taskId: string, priority: TaskPriority) => void;
+  onOpenFiles?: (folder: TaskDocFolder) => void;
 }
 
 function TaskRowCard({
@@ -108,6 +136,7 @@ function TaskRowCard({
   busy = false,
   onSelect,
   onChangePriority,
+  onOpenFiles,
 }: TaskRowCardProps) {
   const parsed = parseTaskStage(task.next_action);
   const summaryText =
@@ -115,6 +144,7 @@ function TaskRowCard({
       ? `Blocker: ${task.blocker.trim()}`
       : parsed.text;
   const isBlockerSummary = task.state === "blocked" && !!task.blocker.trim();
+  const filesFolder = admin && onOpenFiles ? resolveTaskFilesFolder(task) : null;
 
   return (
     <Card
@@ -141,12 +171,29 @@ function TaskRowCard({
           <StageBadge stage={parsed.stage} parsed={parsed} />
           <Badge variant="outline" className="text-[11px]">{task.owner === "user" ? "USER" : task.owner || "Unassigned"}</Badge>
         </button>
-        <PriorityFlagControl
-          task={task}
-          admin={admin}
-          disabled={busy}
-          onChangePriority={onChangePriority}
-        />
+        <div className="flex shrink-0 items-center gap-1.5">
+          {filesFolder && (
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              data-open-files={task.id}
+              data-open-files-path={filesFolder.folder}
+              title={`Open files in ${filesFolder.folder}`}
+              className="h-6 gap-1 rounded-md border-border/80 px-2 text-[11px] text-muted-foreground hover:text-foreground touch:h-8"
+              onClick={() => onOpenFiles?.(filesFolder)}
+            >
+              <FolderOpen className="size-3 shrink-0" aria-hidden="true" />
+              Open files
+            </Button>
+          )}
+          <PriorityFlagControl
+            task={task}
+            admin={admin}
+            disabled={busy}
+            onChangePriority={onChangePriority}
+          />
+        </div>
       </div>
       <button
         type="button"
@@ -466,46 +513,56 @@ export function GoalsView() {
   }
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <header className="flex min-h-14 flex-wrap items-center gap-2 border-b bg-card/40 px-3 py-2 sm:px-5">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
+      <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b bg-card/40 px-3 py-2 sm:px-5">
         <h1 className="mr-auto text-lg font-semibold tracking-tight">Goals</h1>
         {admin && data && <>
           <Button size="sm" variant="outline" className="h-10 touch:h-11" onClick={() => openEditor("goal")}><Plus /> Goal</Button>
           <Button size="sm" className="h-10 touch:h-11" disabled={!data.goals.length} onClick={() => openEditor("task")}><Plus /> Task</Button>
         </>}
       </header>
-      {error && <div role="alert" className="border-b px-3 py-2 text-sm text-destructive">{error}</div>}
+      {error && <div role="alert" className="shrink-0 border-b px-3 py-2 text-sm text-destructive">{error}</div>}
       {data ? (
-        <div className={cn("grid min-h-0 flex-1", detailOpen && "min-[900px]:grid-cols-[minmax(20rem,2fr)_minmax(0,3fr)]")}>
-          <div ref={listRef} className={cn("min-h-0 min-w-0 overflow-y-auto", detailOpen && "hidden min-[900px]:block min-[900px]:border-r")}>
-            <div className={cn("min-w-0 px-3 py-4 sm:px-5", viewMode === "board" && !detailOpen ? "w-full" : "mx-auto max-w-6xl")}>
-              <div className="mb-3 space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button size="sm" variant={viewMode === "goals" ? "outline" : "ghost"} className={cn("h-10 touch:h-11", viewMode === "goals" && ACTIVE_FILTER_OUTLINE)} data-view-tab="goals"
+        <div className={cn("grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] overflow-hidden", detailOpen && "min-[900px]:grid-cols-[minmax(20rem,2fr)_minmax(0,3fr)]")}>
+          <div
+            data-goals-pane="true"
+            className={cn(
+              "flex h-full min-h-0 min-w-0 flex-col overflow-hidden",
+              detailOpen && "hidden min-[900px]:flex min-[900px]:border-r",
+            )}
+          >
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col px-3 pt-3 pb-2 sm:px-5">
+              <div className="mx-auto w-full max-w-7xl shrink-0">
+                <div
+                  data-goals-top-bar="true"
+                  className="mb-2.5 flex flex-wrap items-center gap-1 rounded-lg border border-border/80 bg-card/60 px-2 py-1.5"
+                >
+                <div className="flex flex-wrap items-center gap-0.5 min-[1360px]:gap-1">
+                  <Button size="xs" variant={viewMode === "goals" ? "outline" : "ghost"} className={cn("h-7 gap-1 px-1.5 text-xs touch:h-9", viewMode === "goals" && ACTIVE_FILTER_OUTLINE)} data-view-tab="goals"
                     onClick={() => enterAcrossView("goals")}>
-                    <Target /> Goals <Badge variant="outline">{data.goals.length}</Badge>
+                    <Target className="size-3.5" aria-hidden="true" /> Goals <Badge variant="outline" className="px-1 text-[10px]">{data.goals.length}</Badge>
                   </Button>
-                  <Button size="sm" variant={viewMode === "decisions" ? "outline" : "ghost"} className={cn("h-10 touch:h-11", viewMode === "decisions" && ACTIVE_FILTER_OUTLINE)} data-view-tab="decisions"
+                  <Button size="xs" variant={viewMode === "decisions" ? "outline" : "ghost"} title="Needs your decision" className={cn("h-7 gap-1 px-1.5 text-xs touch:h-9", viewMode === "decisions" && ACTIVE_FILTER_OUTLINE)} data-view-tab="decisions"
                     onClick={() => enterAcrossView("decisions")}>
-                    <TriangleAlert /> Needs your decision <Badge variant="outline">{totalDecisions}</Badge>
+                    <TriangleAlert className="size-3.5" aria-hidden="true" /> Decisions <Badge variant="outline" className="px-1 text-[10px]">{totalDecisions}</Badge>
                   </Button>
-                  <Button size="sm" variant={viewMode === "ready" ? "outline" : "ghost"} className={cn("h-10 touch:h-11", viewMode === "ready" && ACTIVE_FILTER_OUTLINE)} data-view-tab="ready"
+                  <Button size="xs" variant={viewMode === "ready" ? "outline" : "ghost"} title="Ready next" className={cn("h-7 gap-1 px-1.5 text-xs touch:h-9", viewMode === "ready" && ACTIVE_FILTER_OUTLINE)} data-view-tab="ready"
                     onClick={() => enterAcrossView("ready")}>
-                    <ListChecks /> Ready next <Badge variant="outline">{totalReady}</Badge>
+                    <ListChecks className="size-3.5" aria-hidden="true" /> Ready <Badge variant="outline" className="px-1 text-[10px]">{totalReady}</Badge>
                   </Button>
-                  <Button size="sm" variant={viewMode === "active" ? "outline" : "ghost"} className={cn("h-10 touch:h-11", viewMode === "active" && ACTIVE_FILTER_OUTLINE)} data-view-tab="active"
+                  <Button size="xs" variant={viewMode === "active" ? "outline" : "ghost"} title="In progress" className={cn("h-7 gap-1 px-1.5 text-xs touch:h-9", viewMode === "active" && ACTIVE_FILTER_OUTLINE)} data-view-tab="active"
                     onClick={() => enterAcrossView("active")}>
-                    <Activity /> In progress <Badge variant="outline">{totalActive}</Badge>
+                    <Activity className="size-3.5" aria-hidden="true" /> Active <Badge variant="outline" className="px-1 text-[10px]">{totalActive}</Badge>
                   </Button>
-                  <Button size="sm" variant={viewMode === "board" ? "outline" : "ghost"} className={cn("h-10 touch:h-11", viewMode === "board" && ACTIVE_FILTER_OUTLINE)} data-view-tab="board"
+                  <Button size="xs" variant={viewMode === "board" ? "outline" : "ghost"} title="Stage board" className={cn("h-7 gap-1 px-1.5 text-xs touch:h-9", viewMode === "board" && ACTIVE_FILTER_OUTLINE)} data-view-tab="board"
                     onClick={() => setViewMode("board")}>
-                    <Columns3 /> Stage board <Badge variant="outline">{boardRows.length}</Badge>
+                    <Columns3 className="size-3.5" aria-hidden="true" /> Board <Badge variant="outline" className="px-1 text-[10px]">{boardRows.length}</Badge>
                   </Button>
                   <Button
                     size="icon"
                     variant="outline"
                     className={cn(
-                      "size-10 touch:size-11",
+                      "size-7 touch:size-9",
                       (showFilters || dropdownFilterCount > 0)
                         ? ACTIVE_FILTER_OUTLINE
                         : "border-transparent bg-transparent hover:border-border/70 hover:bg-muted/60",
@@ -515,12 +572,24 @@ export function GoalsView() {
                     title="Filters"
                     onClick={() => setShowFilters((value) => !value)}
                   >
-                    <ListFilter />
+                    <ListFilter className="size-3.5" />
                   </Button>
-                  {admin && <Button size="sm" variant="ghost" className="h-10 touch:h-11" onClick={() => choose("untagged")}><Tag /> Untagged</Button>}
+                  {admin && (
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      aria-label="Untagged"
+                      title="Untagged"
+                      className="h-7 gap-1 px-1.5 text-xs touch:h-9"
+                      onClick={() => choose("untagged")}
+                    >
+                      <Tag className="size-3.5" aria-hidden="true" />
+                      <span className="hidden min-[1360px]:inline">Untagged</span>
+                    </Button>
+                  )}
                 </div>
-                <div role="group" aria-label="Filter by priority" className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-xs font-medium text-muted-foreground">Priority:</span>
+                <span aria-hidden="true" className="mx-0.5 hidden h-4 w-px bg-border/80 min-[1360px]:block" />
+                <div role="group" aria-label="Filter by priority" className="flex flex-wrap items-center gap-0.5 min-[1360px]:gap-1">
                   {PRIORITY_FILTERS.map((opt) => {
                     const active = priorityFilter === opt.value;
                     const count = priorityCounts[opt.value];
@@ -534,7 +603,7 @@ export function GoalsView() {
                         aria-pressed={active}
                         data-priority-filter={opt.value || "all"}
                         className={cn(
-                          "h-7 gap-1 px-2 text-xs tabular-nums",
+                          "h-7 gap-1 px-1.5 text-[11px] tabular-nums touch:h-9",
                           active ? ACTIVE_FILTER_OUTLINE : "border-border/80",
                         )}
                         onClick={() => setPriorityFilter(opt.value)}
@@ -551,53 +620,56 @@ export function GoalsView() {
                       size="xs"
                       variant="outline"
                       data-clear-filters="true"
-                      className="ml-auto h-7 border-border/80 px-2 text-xs text-muted-foreground hover:text-foreground"
+                      title="Reset filters"
+                      className="h-7 border-border/80 px-1.5 text-[11px] text-muted-foreground hover:text-foreground touch:h-9"
                       onClick={clearViewFilters}
                     >
-                      Reset filters
+                      Reset
                     </Button>
                   )}
                 </div>
+                <span aria-hidden="true" className="mx-0.5 hidden h-4 w-px bg-border/80 min-[1360px]:block" />
                 <TaskProgressBar
+                  inline
                   dataAttr={{ "data-overall-progress": "true" }}
                   summary={overallProgress}
-                  label="Overall task delivery progress"
-                  className="rounded-lg border border-border/80 bg-muted/20 px-3 py-2"
+                  label="Overall task completion progress"
                 />
+                </div>
+                {showFilters && <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3 min-[900px]:grid-cols-2" aria-label="Task filters">
+                  <SearchableSelect
+                    label="Filter by goal"
+                    value={activeGoal}
+                    onChange={(value) => (viewMode === "board" ? setBoardGoal(value) : setGoalFilter(value))}
+                    options={withChoice("All goals", goalOptions)}
+                    className={activeGoal ? ACTIVE_FILTER_OUTLINE : undefined}
+                  />
+                  <SearchableSelect
+                    label="Filter by state"
+                    value={stateFilter}
+                    onChange={setStateFilter}
+                    options={withChoice("Any state", stateOptions)}
+                    className={stateFilter ? ACTIVE_FILTER_OUTLINE : undefined}
+                  />
+                  <SearchableSelect
+                    label="Filter by stage"
+                    value={stageFilter}
+                    onChange={setStageFilter}
+                    options={withChoice("Any stage", [...stageOptions, { value: "-", label: "No stage / malformed" }])}
+                    className={stageFilter ? ACTIVE_FILTER_OUTLINE : undefined}
+                  />
+                  <SearchableSelect
+                    label="Filter by owner"
+                    value={ownerFilter}
+                    onChange={setOwnerFilter}
+                    options={withChoice("Any owner", [{ value: "-", label: "Unassigned" }, ...personOptions])}
+                    className={ownerFilter ? ACTIVE_FILTER_OUTLINE : undefined}
+                  />
+                </div>}
               </div>
-              {showFilters && <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 min-[900px]:grid-cols-2" aria-label="Task filters">
-                <SearchableSelect
-                  label="Filter by goal"
-                  value={activeGoal}
-                  onChange={(value) => (viewMode === "board" ? setBoardGoal(value) : setGoalFilter(value))}
-                  options={withChoice("All goals", goalOptions)}
-                  className={activeGoal ? ACTIVE_FILTER_OUTLINE : undefined}
-                />
-                <SearchableSelect
-                  label="Filter by state"
-                  value={stateFilter}
-                  onChange={setStateFilter}
-                  options={withChoice("Any state", stateOptions)}
-                  className={stateFilter ? ACTIVE_FILTER_OUTLINE : undefined}
-                />
-                <SearchableSelect
-                  label="Filter by stage"
-                  value={stageFilter}
-                  onChange={setStageFilter}
-                  options={withChoice("Any stage", [...stageOptions, { value: "-", label: "No stage / malformed" }])}
-                  className={stageFilter ? ACTIVE_FILTER_OUTLINE : undefined}
-                />
-                <SearchableSelect
-                  label="Filter by owner"
-                  value={ownerFilter}
-                  onChange={setOwnerFilter}
-                  options={withChoice("Any owner", [{ value: "-", label: "Unassigned" }, ...personOptions])}
-                  className={ownerFilter ? ACTIVE_FILTER_OUTLINE : undefined}
-                />
-              </div>}
               {viewMode === "board" ? (
                 <>
-                  <div className="mb-3 space-y-2">
+                  <div className="mx-auto mb-2 w-full max-w-7xl shrink-0 space-y-1.5">
                     <div role="group" aria-label="Filter stage board by goal" className="flex flex-wrap items-center gap-1.5">
                       <Button
                         type="button"
@@ -649,143 +721,154 @@ export function GoalsView() {
                       </div>
                     )}
                   </div>
-                  {!boardRows.length && <Card size="sm" className="mb-3"><CardContent className={textClass}>No tasks match.</CardContent></Card>}
-                  <GoalsBoard tasks={boardRows} selectedId={selected} admin={admin} busy={busy} onSelect={choose} onChangePriority={handleChangePriority} />
+                  {!boardRows.length && <Card size="sm" className="mx-auto mb-2 w-full max-w-7xl shrink-0"><CardContent className={textClass}>No tasks match.</CardContent></Card>}
+                  <GoalsBoard tasks={boardRows} selectedId={selected} admin={admin} busy={busy} constrained={detailOpen} onSelect={choose} onChangePriority={handleChangePriority} onOpenFiles={setBrowseFolder} />
                 </>
-              ) : viewMode === "decisions" ? (
-                <div className="space-y-3" data-view-panel="decisions">
-                  <p className={textClass}>Tasks waiting on a USER decision across all goals, sorted by priority.</p>
-                  {decisionRows.length > 0 ? (
-                    <ul className="space-y-2.5 p-0.5">
-                      {decisionRows.map((row) => (
-                        <li key={row.id}>
-                          <TaskRowCard task={row} selected={selected === row.id} showGoalBadge admin={admin} busy={busy} onSelect={choose} onChangePriority={handleChangePriority} />
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <Card size="sm"><CardContent className={textClass}>No tasks waiting on a USER decision match the current filters.</CardContent></Card>
-                  )}
-                </div>
-              ) : viewMode === "ready" ? (
-                <div className="space-y-3" data-view-panel="ready">
-                  <p className={textClass}>Tasks ready to start across all goals (to-do tasks not held on a USER decision), sorted by priority.</p>
-                  {readyRows.length > 0 ? (
-                    <ul className="space-y-2.5 p-0.5">
-                      {readyRows.map((row) => (
-                        <li key={row.id}>
-                          <TaskRowCard task={row} selected={selected === row.id} showGoalBadge admin={admin} busy={busy} onSelect={choose} onChangePriority={handleChangePriority} />
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <Card size="sm"><CardContent className={textClass}>No ready-to-start tasks match the current filters.</CardContent></Card>
-                  )}
-                </div>
-              ) : viewMode === "active" ? (
-                <div className="space-y-3" data-view-panel="active">
-                  <p className={textClass}>Active work in progress across all goals (in-progress tasks not held on a USER decision), sorted by priority.</p>
-                  {activeRows.length > 0 ? (
-                    <ul className="space-y-2.5 p-0.5">
-                      {activeRows.map((row) => (
-                        <li key={row.id}>
-                          <TaskRowCard task={row} selected={selected === row.id} showGoalBadge admin={admin} busy={busy} onSelect={choose} onChangePriority={handleChangePriority} />
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <Card size="sm"><CardContent className={textClass}>No active tasks in progress match the current filters.</CardContent></Card>
-                  )}
-                </div>
               ) : (
-                <div className="space-y-3" data-view-panel="goals">
-                  <Accordion
-                    multiple
-                    value={openGroups}
-                    onValueChange={(ids) => setExpandedGroups({ filter: groupFilter, ids })}
-                    aria-label="Tasks by goal"
-                    className="space-y-2.5"
-                  >
-                    {groups.map((group) => {
-                      const items = rows.filter((row) => row.goal_id === group.id);
-                      if (!items.length && !goal) return null;
-                      const allInGoal = data.tasks.filter((row) => row.goal_id === group.id);
-                      const goalProgress = summarizeTaskProgress(allInGoal);
-                      const blockedCount = allInGoal.filter((row) => row.state === "blocked").length;
-                      return (
-                        <AccordionItem key={group.id} value={group.id} data-goal-section={group.id} className="rounded-xl border border-border/80 bg-card ring-0">
-                          <div className="flex flex-wrap items-center gap-1 pr-2">
-                            <AccordionTrigger className="min-w-0 flex-1">
-                              <Badge variant="outline" className="font-mono">{group.id}</Badge>
-                              <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{plainTaskTitle(group.title)}</span>
-                              {blockedCount > 0 && (
-                                <Badge variant="secondary" className={cn("tabular-nums", GOAL_STATE_STYLE.blocked.cls)}>
-                                  {blockedCount} blocked
-                                </Badge>
-                              )}
-                              <Badge variant="secondary" className="tabular-nums" aria-label={`${items.length} tasks`}>{items.length}</Badge>
-                            </AccordionTrigger>
-                            <Button
-                              type="button"
-                              size="xs"
-                              variant="outline"
-                              data-open-goal-board={group.id}
-                              title={`Open ${group.id} 6-stage board`}
-                              className="h-8 gap-1 px-2 text-xs"
-                              onClick={() => openGoalBoard(group.id)}
-                            >
-                              <Columns3 className="size-3.5" aria-hidden="true" />
-                              <span className="hidden sm:inline">Stage board</span>
-                            </Button>
-                            {admin && (
-                              <DropdownMenu>
-                                <DropdownMenuTrigger render={<Button size="icon" variant="ghost" className="size-9 touch:size-11" aria-label={`Actions for ${group.id}`}><MoreHorizontal /></Button>} />
-                                <DropdownMenuContent align="end" className="w-40">
-                                  <DropdownMenuItem className="touch:min-h-11" onClick={() => openEditor("goal", group)}>Rename goal</DropdownMenuItem>
-                                  <DropdownMenuItem className="touch:min-h-11" variant="destructive"
-                                    onClick={() => setRemove({ goal: group, count: allInGoal.length })}>Remove goal</DropdownMenuItem>
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            )}
-                          </div>
-                          <div className="px-3 pb-2">
-                            <TaskProgressBar
-                              dataAttr={{ "data-goal-progress": group.id }}
-                              summary={goalProgress}
-                              label={`${group.id} delivery progress`}
-                              compact
-                            />
-                          </div>
-                          <AccordionContent className="space-y-2.5 px-3 pt-1 pb-3">
-                            {items.length > 0 ? (
-                              <ul className="space-y-2.5 p-0.5">
-                                {items.map((row) => (
-                                  <li key={row.id}>
-                                    <TaskRowCard
-                                      task={row}
-                                      selected={selected === row.id}
-                                      admin={admin}
-                                      busy={busy}
-                                      onSelect={choose}
-                                      onChangePriority={handleChangePriority}
-                                    />
-                                  </li>
-                                ))}
-                              </ul>
-                            ) : (
-                              <p className="px-1 py-2 text-xs text-muted-foreground">No matching tasks in {group.id}.</p>
-                            )}
-                          </AccordionContent>
-                        </AccordionItem>
-                      );
-                    })}
-                    {!rows.length && <Card size="sm"><CardContent className={textClass}>No tasks match.</CardContent></Card>}
-                  </Accordion>
+                <div
+                  ref={listRef}
+                  data-goals-list-scroll="true"
+                  className="min-h-0 flex-1 overflow-y-auto pr-0.5 pb-2"
+                >
+                  <div className="mx-auto w-full max-w-7xl">
+                    {viewMode === "decisions" ? (
+                    <div className="space-y-3" data-view-panel="decisions">
+                      <p className={textClass}>Tasks waiting on a USER decision across all goals, sorted by priority.</p>
+                      {decisionRows.length > 0 ? (
+                        <ul className="space-y-2.5 p-0.5">
+                          {decisionRows.map((row) => (
+                            <li key={row.id}>
+                              <TaskRowCard task={row} selected={selected === row.id} showGoalBadge admin={admin} busy={busy} onSelect={choose} onChangePriority={handleChangePriority} onOpenFiles={setBrowseFolder} />
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <Card size="sm"><CardContent className={textClass}>No tasks waiting on a USER decision match the current filters.</CardContent></Card>
+                      )}
+                    </div>
+                  ) : viewMode === "ready" ? (
+                    <div className="space-y-3" data-view-panel="ready">
+                      <p className={textClass}>Tasks ready to start across all goals (to-do tasks not held on a USER decision), sorted by priority.</p>
+                      {readyRows.length > 0 ? (
+                        <ul className="space-y-2.5 p-0.5">
+                          {readyRows.map((row) => (
+                            <li key={row.id}>
+                              <TaskRowCard task={row} selected={selected === row.id} showGoalBadge admin={admin} busy={busy} onSelect={choose} onChangePriority={handleChangePriority} onOpenFiles={setBrowseFolder} />
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <Card size="sm"><CardContent className={textClass}>No ready-to-start tasks match the current filters.</CardContent></Card>
+                      )}
+                    </div>
+                  ) : viewMode === "active" ? (
+                    <div className="space-y-3" data-view-panel="active">
+                      <p className={textClass}>Active work in progress across all goals (in-progress tasks not held on a USER decision), sorted by priority.</p>
+                      {activeRows.length > 0 ? (
+                        <ul className="space-y-2.5 p-0.5">
+                          {activeRows.map((row) => (
+                            <li key={row.id}>
+                              <TaskRowCard task={row} selected={selected === row.id} showGoalBadge admin={admin} busy={busy} onSelect={choose} onChangePriority={handleChangePriority} onOpenFiles={setBrowseFolder} />
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <Card size="sm"><CardContent className={textClass}>No active tasks in progress match the current filters.</CardContent></Card>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-3" data-view-panel="goals">
+                      <Accordion
+                        multiple
+                        value={openGroups}
+                        onValueChange={(ids) => setExpandedGroups({ filter: groupFilter, ids })}
+                        aria-label="Tasks by goal"
+                        className="space-y-2.5"
+                      >
+                        {groups.map((group) => {
+                          const items = rows.filter((row) => row.goal_id === group.id);
+                          if (!items.length && !goal) return null;
+                          const allInGoal = data.tasks.filter((row) => row.goal_id === group.id);
+                          const goalProgress = summarizeTaskProgress(allInGoal);
+                          const blockedCount = allInGoal.filter((row) => row.state === "blocked").length;
+                          return (
+                            <AccordionItem key={group.id} value={group.id} data-goal-section={group.id} className="rounded-xl border border-border/80 bg-card ring-0">
+                              <div className="flex flex-wrap items-center gap-1 pr-2">
+                                <AccordionTrigger className="min-w-0 flex-1">
+                                  <Badge variant="outline" className="font-mono">{group.id}</Badge>
+                                  <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{plainTaskTitle(group.title)}</span>
+                                  {blockedCount > 0 && (
+                                    <Badge variant="secondary" className={cn("tabular-nums", GOAL_STATE_STYLE.blocked.cls)}>
+                                      {blockedCount} blocked
+                                    </Badge>
+                                  )}
+                                  <Badge variant="secondary" className="tabular-nums" aria-label={`${items.length} tasks`}>{items.length}</Badge>
+                                </AccordionTrigger>
+                                <Button
+                                  type="button"
+                                  size="xs"
+                                  variant="outline"
+                                  data-open-goal-board={group.id}
+                                  title={`Open ${group.id} 6-stage board`}
+                                  className="h-8 gap-1 px-2 text-xs"
+                                  onClick={() => openGoalBoard(group.id)}
+                                >
+                                  <Columns3 className="size-3.5" aria-hidden="true" />
+                                  <span className="hidden sm:inline">Stage board</span>
+                                </Button>
+                                {admin && (
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger render={<Button size="icon" variant="ghost" className="size-9 touch:size-11" aria-label={`Actions for ${group.id}`}><MoreHorizontal /></Button>} />
+                                    <DropdownMenuContent align="end" className="w-40">
+                                      <DropdownMenuItem className="touch:min-h-11" onClick={() => openEditor("goal", group)}>Rename goal</DropdownMenuItem>
+                                      <DropdownMenuItem className="touch:min-h-11" variant="destructive"
+                                        onClick={() => setRemove({ goal: group, count: allInGoal.length })}>Remove goal</DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                )}
+                              </div>
+                              <div className="px-3 pb-2">
+                                <TaskProgressBar
+                                  dataAttr={{ "data-goal-progress": group.id }}
+                                  summary={goalProgress}
+                                  label={`${group.id} delivery progress`}
+                                  compact
+                                />
+                              </div>
+                              <AccordionContent className="space-y-2.5 px-3 pt-1 pb-3">
+                                {items.length > 0 ? (
+                                  <ul className="space-y-2.5 p-0.5">
+                                    {items.map((row) => (
+                                      <li key={row.id}>
+                                        <TaskRowCard
+                                          task={row}
+                                          selected={selected === row.id}
+                                          admin={admin}
+                                          busy={busy}
+                                          onSelect={choose}
+                                          onChangePriority={handleChangePriority}
+                                          onOpenFiles={setBrowseFolder}
+                                        />
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : (
+                                  <p className="px-1 py-2 text-xs text-muted-foreground">No matching tasks in {group.id}.</p>
+                                )}
+                              </AccordionContent>
+                            </AccordionItem>
+                          );
+                        })}
+                        {!rows.length && <Card size="sm"><CardContent className={textClass}>No tasks match.</CardContent></Card>}
+                      </Accordion>
+                    </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
           </div>
-          {detailOpen && <div ref={detailRef} className="min-h-0 min-w-0 overflow-y-auto bg-muted/20 p-3 sm:p-5">
+          {detailOpen && <div ref={detailRef} className="h-full min-h-0 min-w-0 overflow-y-auto bg-muted/20 p-3 sm:p-5">
             <div className="mx-auto max-w-3xl space-y-4">
               <Card>
                 <CardHeader>

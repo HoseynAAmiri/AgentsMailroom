@@ -513,6 +513,27 @@ export function extractTaskDocLinks(links?: readonly string[] | null, taskId?: s
   };
 }
 
+/** Resolve a task's primary folder (linked task folder first, else its goal folder `docs/goals-and-tasks/G<n>`). */
+export function resolveTaskFilesFolder(
+  task: { id: string; goal_id?: string | null; links?: readonly string[] | null },
+): TaskDocFolder | null {
+  const { ownedFolders } = extractTaskDocLinks(task.links, task.id);
+  if (ownedFolders.length > 0) return ownedFolders[0];
+  const explicitGoal = (task.goal_id ?? "").trim().toUpperCase();
+  const idMatch = /^(G[1-9]\d*)\./i.exec(task.id.trim());
+  const goalId = explicitGoal || (idMatch ? idMatch[1].toUpperCase() : "");
+  if (!/^G[1-9]\d*$/.test(goalId)) return null;
+  return {
+    folder: `docs/goals-and-tasks/${goalId}`,
+    label: goalId,
+    slug: goalId,
+    context: null,
+    dossier: null,
+    pdf: null,
+    extra: [],
+  };
+}
+
 export interface StagedTaskItem<T> {
   task: T;
   parsed: ParsedTaskStage;

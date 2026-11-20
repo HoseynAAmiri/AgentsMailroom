@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronDown, CircleCheck, Flag, TriangleAlert } from "lucide-react";
+import { Check, ChevronDown, CircleCheck, Flag, FolderOpen, TriangleAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -19,8 +19,10 @@ import {
   TASK_STAGE_STYLE,
   groupTasksByStage,
   plainTaskTitle,
+  resolveTaskFilesFolder,
   sortTasksByPriority,
   type ParsedTaskStage,
+  type TaskDocFolder,
   type TaskStage,
 } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -155,11 +157,13 @@ export function PriorityFlagControl({
   task,
   admin,
   disabled = false,
+  compact = false,
   onChangePriority,
 }: {
   task: Pick<GoalTask, "id" | "priority">;
   admin: boolean;
   disabled?: boolean;
+  compact?: boolean;
   onChangePriority?: (taskId: string, priority: TaskPriority) => void;
 }) {
   if (!admin || !onChangePriority) {
@@ -183,7 +187,9 @@ export function PriorityFlagControl({
             aria-label={`Priority for ${task.id}: ${style.label}. Change priority`}
             title="Change priority (USER only)"
             className={cn(
-              "h-6 cursor-pointer gap-1 rounded-md px-2 text-[11px] font-medium transition-[filter,box-shadow] hover:brightness-95 dark:hover:brightness-110 touch:h-8",
+              compact
+                ? "h-5 cursor-pointer gap-0.5 rounded px-1.5 text-[10px] font-medium transition-[filter,box-shadow] hover:brightness-95 dark:hover:brightness-110 touch:h-7"
+                : "h-6 cursor-pointer gap-1 rounded-md px-2 text-[11px] font-medium transition-[filter,box-shadow] hover:brightness-95 dark:hover:brightness-110 touch:h-8",
               style.cls,
             )}
           >
@@ -225,9 +231,10 @@ interface BoardCardProps {
   busy?: boolean;
   onSelect: (id: string) => void;
   onChangePriority?: (taskId: string, priority: TaskPriority) => void;
+  onOpenFiles?: (folder: TaskDocFolder) => void;
 }
 
-function BoardCard({ task, parsed, selectedId, admin, busy = false, onSelect, onChangePriority }: BoardCardProps) {
+function BoardCard({ task, parsed, selectedId, admin, busy = false, onSelect, onChangePriority, onOpenFiles }: BoardCardProps) {
   const isSelected = selectedId === task.id;
   const heading = titleParts(task.title).heading;
   const summaryText =
@@ -235,32 +242,33 @@ function BoardCard({ task, parsed, selectedId, admin, busy = false, onSelect, on
       ? `Blocker: ${task.blocker.trim()}`
       : parsed.text;
   const isBlockerSummary = task.state === "blocked" && !!task.blocker.trim();
+  const filesFolder = admin && onOpenFiles ? resolveTaskFilesFolder(task) : null;
 
   return (
     <Card
       size="sm"
       data-task-card={task.id}
       className={cn(
-        "shrink-0 gap-0 border border-border/80 py-0 ring-0 shadow-xs transition-colors",
+        "min-w-0 shrink-0 gap-0 border border-border/80 py-0 ring-0 shadow-xs transition-colors",
         task.state === "done" && !isSelected && "border-border/50 bg-muted/35",
         task.state === "blocked" && "border-l-2 border-l-amber-500",
         isSelected && "border-primary/70 bg-primary/8",
       )}
     >
-      <div className="flex items-start justify-between gap-2 px-3 pt-2.5 pb-1">
+      <div className="flex items-start justify-between gap-1.5 px-2.5 pt-2 pb-1">
         <button
           type="button"
           onClick={() => onSelect(task.id)}
           aria-current={isSelected ? "true" : undefined}
           className="flex min-w-0 flex-1 flex-wrap items-center gap-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <Badge variant="ghost" className="px-0 font-mono text-xs text-muted-foreground">
+          <Badge variant="ghost" className="px-0 font-mono text-[11px] text-muted-foreground">
             {task.id}
           </Badge>
           <StateBadge task={task} />
           <DecisionBadge decision={task.decision} />
           {!parsed.stage && <StageBadge stage={null} parsed={parsed} />}
-          <Badge variant="outline" className="text-[11px]">
+          <Badge variant="outline" className="px-1.5 text-[10px]">
             {task.owner === "user" ? "USER" : task.owner || "Unassigned"}
           </Badge>
         </button>
@@ -268,6 +276,7 @@ function BoardCard({ task, parsed, selectedId, admin, busy = false, onSelect, on
           task={task}
           admin={admin}
           disabled={busy}
+          compact
           onChangePriority={onChangePriority}
         />
       </div>
@@ -275,11 +284,14 @@ function BoardCard({ task, parsed, selectedId, admin, busy = false, onSelect, on
         type="button"
         onClick={() => onSelect(task.id)}
         aria-current={isSelected ? "true" : undefined}
-        className="block w-full min-w-0 rounded-b-xl px-3 pt-0.5 pb-2.5 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className={cn(
+          "block w-full min-w-0 px-2.5 pt-0.5 pb-2 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          !filesFolder && "rounded-b-xl",
+        )}
       >
         <p
           className={cn(
-            "line-clamp-2 text-sm leading-snug [overflow-wrap:anywhere]",
+            "line-clamp-2 text-[13px] leading-snug [overflow-wrap:anywhere]",
             task.state === "done" && !isSelected ? "font-normal text-muted-foreground" : "font-medium",
           )}
         >
@@ -288,7 +300,7 @@ function BoardCard({ task, parsed, selectedId, admin, busy = false, onSelect, on
         {summaryText && (
           <p
             className={cn(
-              "mt-1 line-clamp-2 text-xs leading-snug [overflow-wrap:anywhere]",
+              "mt-1 line-clamp-2 text-[11px] leading-snug [overflow-wrap:anywhere]",
               isBlockerSummary ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground",
             )}
           >
@@ -296,6 +308,23 @@ function BoardCard({ task, parsed, selectedId, admin, busy = false, onSelect, on
           </p>
         )}
       </button>
+      {filesFolder && (
+        <div className="flex items-center border-t border-border/60 px-2 py-1">
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            data-open-files={task.id}
+            data-open-files-path={filesFolder.folder}
+            title={`Open files in ${filesFolder.folder}`}
+            className="h-6 gap-1 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+            onClick={() => onOpenFiles?.(filesFolder)}
+          >
+            <FolderOpen className="size-3 shrink-0" aria-hidden="true" />
+            Open files
+          </Button>
+        </div>
+      )}
     </Card>
   );
 }
@@ -305,27 +334,45 @@ interface GoalsBoardProps {
   selectedId: string;
   admin: boolean;
   busy?: boolean;
+  constrained?: boolean;
   onSelect: (id: string) => void;
   onChangePriority?: (taskId: string, priority: TaskPriority) => void;
+  onOpenFiles?: (folder: TaskDocFolder) => void;
 }
 
-export function GoalsBoard({ tasks, selectedId, admin, busy = false, onSelect, onChangePriority }: GoalsBoardProps) {
+export function GoalsBoard({
+  tasks,
+  selectedId,
+  admin,
+  busy = false,
+  constrained = false,
+  onSelect,
+  onChangePriority,
+  onOpenFiles,
+}: GoalsBoardProps) {
   const { columns, unstaged } = groupTasksByStage(sortTasksByPriority(tasks));
 
   return (
     <div
       role="region"
       aria-label="Pipeline stages board"
-      className="flex min-w-0 items-start gap-3 overflow-x-auto p-1 pb-3"
+      className={cn(
+        "grid min-h-0 flex-1 min-w-0 grid-flow-col auto-cols-[14rem] grid-rows-[minmax(0,1fr)] items-stretch gap-2 overflow-x-auto overflow-y-hidden p-0.5",
+        !constrained && (
+          unstaged.length > 0
+            ? "min-[1280px]:grid-flow-row min-[1280px]:grid-cols-7 min-[1280px]:auto-cols-auto min-[1280px]:overflow-x-visible"
+            : "min-[1100px]:grid-flow-row min-[1100px]:grid-cols-6 min-[1100px]:auto-cols-auto min-[1100px]:overflow-x-visible"
+        ),
+      )}
     >
       {unstaged.length > 0 && (
         <section
           data-stage-column="unstaged"
           aria-label="Needs stage"
-          className="flex w-[17.5rem] shrink-0 flex-col gap-2.5 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3"
+          className="flex h-full min-h-0 min-w-0 flex-col gap-2 overflow-hidden rounded-xl border border-amber-500/40 bg-amber-500/5 p-2"
         >
-          <header className="flex items-center justify-between gap-2 px-0.5">
-            <div className="flex items-center gap-1.5">
+          <header className="flex shrink-0 items-center justify-between gap-1.5 px-0.5">
+            <div className="flex items-center gap-1">
               <Badge
                 variant="outline"
                 className="border-amber-500/50 bg-amber-500/15 text-amber-800 dark:text-amber-300"
@@ -337,10 +384,10 @@ export function GoalsBoard({ tasks, selectedId, admin, busy = false, onSelect, o
               {unstaged.length}
             </Badge>
           </header>
-          <p className="px-0.5 text-[11px] text-amber-800 dark:text-amber-300">
+          <p className="shrink-0 px-0.5 text-[11px] text-amber-800 dark:text-amber-300">
             Unprefixed or malformed D38 [Stage] tag
           </p>
-          <div data-stage-scroll="unstaged" className="grid max-h-[min(70dvh,46rem)] auto-rows-max gap-2.5 overflow-y-auto p-1.5">
+          <div data-stage-scroll="unstaged" className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-0.5">
             {unstaged.map(({ task, parsed }) => (
               <BoardCard
                 key={task.id}
@@ -351,6 +398,7 @@ export function GoalsBoard({ tasks, selectedId, admin, busy = false, onSelect, o
                 busy={busy}
                 onSelect={onSelect}
                 onChangePriority={onChangePriority}
+                onOpenFiles={onOpenFiles}
               />
             ))}
           </div>
@@ -365,29 +413,29 @@ export function GoalsBoard({ tasks, selectedId, admin, busy = false, onSelect, o
             key={col.stage}
             data-stage-column={col.stage}
             aria-label={`Stage ${idx + 1}: ${meta.label}`}
-            className="flex w-[17.5rem] shrink-0 flex-col gap-2.5 rounded-xl border bg-muted/25 p-3"
+            className="flex h-full min-h-0 min-w-0 flex-col gap-2 overflow-hidden rounded-xl border bg-muted/25 p-2"
           >
-            <header className="space-y-1 px-0.5">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5">
+            <header className="shrink-0 space-y-1 px-0.5">
+              <div className="flex items-center justify-between gap-1">
+                <div className="flex min-w-0 items-center gap-1">
                   <span className="font-mono text-xs text-muted-foreground tabular-nums">{idx + 1}.</span>
                   <StageBadge stage={col.stage} />
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex shrink-0 items-center gap-1">
                   {blockedCount > 0 && (
-                    <Badge variant="secondary" className={cn("tabular-nums", GOAL_STATE_STYLE.blocked.cls)}>
-                      {blockedCount} blocked
+                    <Badge variant="secondary" className={cn("px-1.5 text-[10px] tabular-nums", GOAL_STATE_STYLE.blocked.cls)}>
+                      {blockedCount}
                     </Badge>
                   )}
-                  <Badge variant="secondary" className="tabular-nums">
+                  <Badge variant="secondary" className="px-1.5 text-[11px] tabular-nums">
                     {col.items.length}
                   </Badge>
                 </div>
               </div>
-              <p className="text-[11px] text-muted-foreground">{meta.description}</p>
+              <p className="truncate text-[11px] text-muted-foreground" title={meta.description}>{meta.description}</p>
             </header>
             {col.items.length > 0 ? (
-              <div data-stage-scroll={col.stage} className="grid max-h-[min(70dvh,46rem)] auto-rows-max gap-2.5 overflow-y-auto p-1.5">
+              <div data-stage-scroll={col.stage} className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-0.5">
                 {col.items.map(({ task, parsed }) => (
                   <BoardCard
                     key={task.id}
@@ -398,12 +446,13 @@ export function GoalsBoard({ tasks, selectedId, admin, busy = false, onSelect, o
                     busy={busy}
                     onSelect={onSelect}
                     onChangePriority={onChangePriority}
+                    onOpenFiles={onOpenFiles}
                   />
                 ))}
               </div>
             ) : (
-              <p className="rounded-lg border border-dashed px-2.5 py-4 text-center text-xs text-muted-foreground">
-                No tasks in {meta.shortLabel}
+              <p className="rounded-lg border border-dashed px-2 py-3 text-center text-xs text-muted-foreground">
+                Empty
               </p>
             )}
           </section>
