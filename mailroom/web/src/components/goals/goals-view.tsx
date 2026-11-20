@@ -59,6 +59,7 @@ function TaskProgressBar({
   className?: string;
   dataAttr?: Record<string, string>;
 }) {
+  const tooltip = `${summary.delivered} of ${summary.total} delivered (${summary.deliveredPct}%)${summary.readyToDeliver > 0 ? `, ${summary.readyToDeliver} ready` : ""}`;
   return (
     <div {...dataAttr} className={cn("flex flex-wrap items-center gap-x-3 gap-y-1.5", className)}>
       <div
@@ -67,6 +68,7 @@ function TaskProgressBar({
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={summary.deliveredPct}
+        title={tooltip}
         className={cn(
           "relative flex flex-1 overflow-hidden rounded-full bg-muted",
           compact ? "h-1.5 min-w-24" : "h-2 min-w-36",
@@ -87,14 +89,8 @@ function TaskProgressBar({
       </div>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground tabular-nums">
         <span className="font-medium text-emerald-700 dark:text-emerald-300">
-          {summary.delivered}/{summary.total} delivered ({summary.deliveredPct}%)
+          {summary.delivered} of {summary.total} delivered
         </span>
-        {(!compact || summary.readyToDeliver > 0) && (
-          <span className="font-medium text-teal-700 dark:text-teal-300">
-            · {summary.readyToDeliver} ready ([Done])
-          </span>
-        )}
-        <span>· {summary.remaining} left</span>
       </div>
     </div>
   );
