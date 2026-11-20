@@ -131,16 +131,16 @@ function TopBar() {
   }, []);
 
   return (
-    <header className="hide-on-kb relative z-30 grid shrink-0 grid-cols-2 items-center gap-x-2 gap-y-1 border-b border-border bg-card/85 px-2 pt-[max(0.25rem,env(safe-area-inset-top))] pb-2 backdrop-blur-md sm:px-3 md:[--header-side:20.5rem] min-[900px]:h-12 min-[900px]:grid-cols-[minmax(var(--header-side),1fr)_minmax(0,36rem)_minmax(var(--header-side),1fr)] min-[900px]:pt-[env(safe-area-inset-top)] min-[900px]:pb-0 lg:[--header-side:23.5rem] xl:[--header-side:28rem]">
-      <div className="flex min-w-0 items-center gap-2.5">
+    <header className="relative z-30 flex min-h-11 shrink-0 items-center gap-1.5 border-b border-border bg-card/85 px-2 pt-[max(0.25rem,env(safe-area-inset-top))] pb-1 backdrop-blur-md sm:gap-2 sm:px-3 md:[--header-side:20.5rem] min-[900px]:grid min-[900px]:h-12 min-[900px]:min-h-0 min-[900px]:grid-cols-[minmax(var(--header-side),1fr)_minmax(0,36rem)_minmax(var(--header-side),1fr)] min-[900px]:pt-[env(safe-area-inset-top)] min-[900px]:pb-0 lg:[--header-side:23.5rem] xl:[--header-side:28rem]">
+      <div className="flex shrink-0 items-center gap-2 min-[900px]:min-w-0 min-[900px]:gap-2.5">
         <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-sky-500/30 bg-sky-500/15 text-sky-500">
           <Mail className="size-4" />
         </div>
         <div className="hidden min-w-0 leading-tight sm:block">
-          <div className="text-sm font-semibold tracking-tight">Command Center</div>
+          <div className="truncate text-sm font-semibold tracking-tight">Command Center</div>
         </div>
       </div>
-      <div className="relative col-span-2 row-start-2 min-w-0 min-[900px]:col-span-1 min-[900px]:row-start-auto">
+      <div className="relative min-w-0 flex-1 min-[900px]:flex-none">
         <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           ref={ref}
@@ -157,14 +157,14 @@ function TopBar() {
           </button>
         )}
       </div>
-      <div className="flex items-center justify-self-end gap-1 sm:gap-2">
+      <div className="flex shrink-0 items-center justify-self-end gap-1 sm:gap-2">
         {openHuman.length > 0 && (
           <Tip label={`${openHuman.length} waiting on you`} side="bottom">
             <button
               type="button"
               onClick={() => setFolder("needs")}
               aria-label="Waiting on you"
-              className="inline-flex w-14 shrink-0 items-center justify-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/15 py-1 text-xs font-semibold tabular-nums text-amber-700 hover:bg-amber-500/25 dark:text-amber-300"
+              className="inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/15 px-1.5 text-xs font-semibold tabular-nums text-amber-700 hover:bg-amber-500/25 dark:text-amber-300 sm:w-14 sm:px-0 touch:h-9"
             >
               <AlertTriangle className="size-3.5 shrink-0" /> {openHuman.length > 99 ? "99+" : openHuman.length}
             </button>
@@ -194,7 +194,7 @@ function TopBar() {
         </span>
         <HoverTip label="Refresh current view" side="bottom">
           <Button variant="ghost" size="icon-sm" aria-label="Refresh current view"
-            disabled={refreshing} className="text-muted-foreground hover:text-foreground touch:size-10" onClick={async () => {
+            disabled={refreshing} className="text-muted-foreground hover:text-foreground touch:size-9" onClick={async () => {
               setRefreshing(true);
               try { await refreshActiveView(); }
               finally { setRefreshing(false); }
@@ -238,7 +238,7 @@ function Rail() {
             onClick={() => setView(it.id)}
             aria-label={it.label}
             className={cn(
-              "relative m-1 flex h-12 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg text-[11px] font-medium transition-colors md:m-0 md:size-11 md:flex-none md:text-[10px]",
+              "relative m-0.5 flex h-11 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg text-[11px] font-medium transition-colors md:m-0 md:size-11 md:flex-none md:text-[10px]",
               view === it.id ? "tool-active" : "text-foreground/70 hover:bg-muted hover:text-foreground",
             )}
           >

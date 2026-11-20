@@ -83,7 +83,7 @@ export function AgentDialog({ open, onOpenChange, agent }: { open: boolean; onOp
               placeholder="orchestrator, reviewer, worker…"
             />
           </div>
-          <div className="col-span-2 space-y-1.5">
+          <div className="space-y-1.5 sm:col-span-2">
             <Label>Role prompt</Label>
             <div className="flex flex-wrap gap-1">
               {Object.entries(roles).map(([k, r]) => (
@@ -113,16 +113,16 @@ export function AgentDialog({ open, onOpenChange, agent }: { open: boolean; onOp
             <Label>Session / conversation id</Label>
             <Input value={form.session_id ?? ""} onChange={set("session_id")} className="font-mono text-xs" placeholder="optional" />
           </div>
-          <div className="col-span-2 space-y-1.5">
+          <div className="space-y-1.5 sm:col-span-2">
             <Label>Working directory</Label>
             <Input value={form.workdir ?? ""} onChange={set("workdir")} className="font-mono text-xs" placeholder="optional, e.g. a worktree path" />
           </div>
-          <div className="col-span-2 space-y-1.5">
+          <div className="space-y-1.5 sm:col-span-2">
             <Label>Notes</Label>
             <Textarea value={form.notes ?? ""} onChange={set("notes")} rows={2} />
           </div>
           {resume && (
-            <div className="col-span-2 rounded-md bg-muted p-2 font-mono text-xs">
+            <div className="rounded-md bg-muted p-2 font-mono text-xs sm:col-span-2">
               <span className="font-sans text-muted-foreground">Resume: </span>
               {resume}
             </div>

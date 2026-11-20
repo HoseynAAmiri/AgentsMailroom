@@ -23,7 +23,7 @@ export function StatusFeed() {
     <div className="flex h-full flex-col">
       <div className={STATUS_HEADER_CLS}>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon-sm" aria-label="Folders" className="-ml-1 lg:hidden" onClick={() => setNavOpen(true)}>
+          <Button variant="ghost" size="icon-sm" aria-label="Folders" className="-ml-1 lg:hidden touch:size-9" onClick={() => setNavOpen(true)}>
             <Menu />
           </Button>
           <h2 className="text-base font-semibold">Status feed</h2>

@@ -18,7 +18,7 @@ import { MAIL_READING_TOOLBAR_CLS } from "./page-skeletons";
 function IconAction({ label, icon: Icon, onClick, className }: { label: string; icon: typeof Reply; onClick: () => void; className?: string }) {
   return (
     <Tooltip>
-      <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label={label} onClick={onClick} className={className} />}>
+      <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label={label} onClick={onClick} className={cn("touch:size-9", className)} />}>
         <Icon />
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
@@ -257,7 +257,7 @@ export function ReadingPane() {
   return (
     <div className="flex h-full flex-col">
       <div className={MAIL_READING_TOOLBAR_CLS}>
-        <Button variant="ghost" size="icon-sm" aria-label="Back to list" className="md:hidden" onClick={() => select(null)}>
+        <Button variant="ghost" size="icon-sm" aria-label="Back to list" className="md:hidden touch:size-9" onClick={() => select(null)}>
           <ArrowLeft />
         </Button>
         <div className="ml-auto flex items-center gap-0.5">
@@ -276,7 +276,7 @@ export function ReadingPane() {
         )}
         <IconAction label={flagged ? "Unflag" : "Flag"} icon={Flag} onClick={() => mark(flagged ? "unflag" : "flag", flagged ? ids : [last.id])} className={cn(flagged && "fill-red-500 text-red-500")} />
         <DropdownMenu>
-          <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="More" />}>
+          <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" className="touch:size-9" aria-label="More" />}>
             <MoreHorizontal />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">

@@ -77,18 +77,18 @@ export function Composer({ inline }: { inline?: boolean }) {
         if (e.key === "Escape" && !e.defaultPrevented) setConfirmClose(true);
       }}
     >
-      <div className="flex items-center gap-2 border-b px-3 py-2">
+      <div className="flex items-center gap-2 border-b px-3 py-1.5 sm:py-2">
         <Icon className="size-4 text-sky-500" />
         <span className="text-sm font-semibold">{MODE_LABEL[compose.mode]}</span>
         {compose.inReplyTo && <span className="text-xs text-muted-foreground">to {compose.inReplyTo}</span>}
-        <Button variant="ghost" size="icon-sm" aria-label="Close composer" className="ml-auto" disabled={sending} onClick={() => setConfirmClose(true)}>
+        <Button variant="ghost" size="icon-sm" aria-label="Close composer" className="ml-auto touch:size-9" disabled={sending} onClick={() => setConfirmClose(true)}>
           <X />
         </Button>
       </div>
       <div className="px-3">
         <RecipientPicker label="To" value={compose.to ? [compose.to] : []} onChange={(v) => updateCompose({ to: v[v.length - 1] ?? "" })} />
         <RecipientPicker label="Cc" value={compose.cc} onChange={(v) => updateCompose({ cc: v })} multiple exclude={compose.to ? [compose.to] : []} />
-        <div className="flex items-center gap-2 border-b py-1">
+        <div className="flex items-center gap-1.5 border-b py-1 sm:gap-2">
           <Input
             value={compose.subject}
             onChange={(e) => updateCompose({ subject: e.target.value })}
@@ -100,14 +100,14 @@ export function Composer({ inline }: { inline?: boolean }) {
             onChange={(e) => updateCompose({ taskId: e.target.value })}
             aria-label="Task ID"
             placeholder="Task ID"
-            className="h-7 w-28 font-mono text-xs sm:w-44"
+            className="h-7 w-24 font-mono text-xs sm:w-32 lg:w-44"
             title="Choose a project task or enter an existing conversation ID"
           />
           <Popover open={taskPickerOpen} onOpenChange={(open) => {
             setTaskPickerOpen(open);
             if (open && !taskChoices) void api.goalChoices().then((data) => setTaskChoices(data.tasks)).catch(() => setTaskChoices([]));
           }}>
-            <PopoverTrigger render={<Button size="icon-sm" variant="ghost" className="shrink-0 touch:size-11" aria-label="Choose a task"><Tag /></Button>} />
+            <PopoverTrigger render={<Button size="icon-sm" variant="ghost" className="shrink-0 touch:size-9" aria-label="Choose a task"><Tag /></Button>} />
             <PopoverContent align="end" className="w-[min(23rem,calc(100vw-1.5rem))] max-h-(--available-height) overflow-hidden p-0">
               <Command>
                 <CommandInput placeholder="Find a task…" />
@@ -149,7 +149,7 @@ export function Composer({ inline }: { inline?: boolean }) {
           ))}
         </div>
       )}
-      <div className="flex items-center gap-2 border-t px-3 py-2">
+      <div className="flex items-center gap-2 border-t px-3 py-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] sm:py-2">
         <input
           ref={fileRef}
           type="file"
@@ -160,7 +160,7 @@ export function Composer({ inline }: { inline?: boolean }) {
         />
         <Tooltip>
           <TooltipTrigger
-            render={<Button variant="ghost" size="icon-sm" aria-label="Attach image" disabled={uploading || sending} onClick={() => fileRef.current?.click()} />}
+            render={<Button variant="ghost" size="icon-sm" className="touch:size-9" aria-label="Attach image" disabled={uploading || sending} onClick={() => fileRef.current?.click()} />}
           >
             {uploading ? <Loader2 className="animate-spin" /> : <ImagePlus />}
           </TooltipTrigger>

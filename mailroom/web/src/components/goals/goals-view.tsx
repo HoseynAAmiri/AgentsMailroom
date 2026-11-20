@@ -122,7 +122,7 @@ function TaskProgressBar({
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={summary.donePct}
-          className="relative h-2 w-16 overflow-hidden rounded-full bg-muted min-[1360px]:w-28"
+          className="relative h-2 w-12 overflow-hidden rounded-full bg-muted sm:w-16 min-[1360px]:w-28"
         >
           {summary.doneWidthPct > 0 && (
             <div
@@ -619,8 +619,8 @@ export function GoalsView() {
       <header className={GOALS_HEADER_CLS}>
         <h1 className="mr-auto text-lg font-semibold tracking-tight">Goals</h1>
         {admin && data && <>
-          <Button size="sm" variant="outline" className="h-10 touch:h-11" onClick={() => openEditor("goal")}><Plus /> Goal</Button>
-          <Button size="sm" className="h-10 touch:h-11" disabled={!data.goals.length} onClick={() => openEditor("task")}><Plus /> Task</Button>
+          <Button size="sm" variant="outline" className="h-8 touch:h-9 sm:h-9" onClick={() => openEditor("goal")}><Plus /> Goal</Button>
+          <Button size="sm" className="h-8 touch:h-9 sm:h-9" disabled={!data.goals.length} onClick={() => openEditor("task")}><Plus /> Task</Button>
         </>}
       </header>
       {error && <div role="alert" className="shrink-0 border-b px-3 py-2 text-sm text-destructive">{error}</div>}
@@ -630,37 +630,37 @@ export function GoalsView() {
             data-goals-pane="true"
             className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
           >
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col px-3 pt-3 pb-2 sm:px-5">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col px-3 pt-2 pb-2 sm:px-5 sm:pt-3">
               <div className="mx-auto w-full max-w-7xl shrink-0">
                 <div
                   data-goals-top-bar="true"
                   className={GOALS_TOP_BAR_CLS}
                 >
                 <div className={GOALS_TAB_ROW_CLS}>
-                  <Button size="xs" variant={viewMode === "goals" ? "outline" : "ghost"} className={cn("h-7 gap-1 px-1.5 text-xs touch:h-9", viewMode === "goals" && ACTIVE_FILTER_OUTLINE)} data-view-tab="goals"
+                  <Button size="xs" variant={viewMode === "goals" ? "outline" : "ghost"} className={cn("h-7 gap-1 px-1.5 text-xs touch:h-8", viewMode === "goals" && ACTIVE_FILTER_OUTLINE)} data-view-tab="goals"
                     onClick={() => enterAcrossView("goals")}>
                     <Target className="size-3.5" aria-hidden="true" /> Goals <Badge variant="outline" className="px-1 text-[10px]">{data.goals.length}</Badge>
                   </Button>
                   <HoverTip label="Needs your decision">
-                    <Button size="xs" variant={viewMode === "decisions" ? "outline" : "ghost"} className={cn("h-7 gap-1 px-1.5 text-xs touch:h-9", viewMode === "decisions" && ACTIVE_FILTER_OUTLINE)} data-view-tab="decisions"
+                    <Button size="xs" variant={viewMode === "decisions" ? "outline" : "ghost"} className={cn("h-7 gap-1 px-1.5 text-xs touch:h-8", viewMode === "decisions" && ACTIVE_FILTER_OUTLINE)} data-view-tab="decisions"
                       onClick={() => enterAcrossView("decisions")}>
                       <TriangleAlert className="size-3.5" aria-hidden="true" /> Decisions <Badge variant="outline" className="px-1 text-[10px]">{totalDecisions}</Badge>
                     </Button>
                   </HoverTip>
                   <HoverTip label="Ready next">
-                    <Button size="xs" variant={viewMode === "ready" ? "outline" : "ghost"} className={cn("h-7 gap-1 px-1.5 text-xs touch:h-9", viewMode === "ready" && ACTIVE_FILTER_OUTLINE)} data-view-tab="ready"
+                    <Button size="xs" variant={viewMode === "ready" ? "outline" : "ghost"} className={cn("h-7 gap-1 px-1.5 text-xs touch:h-8", viewMode === "ready" && ACTIVE_FILTER_OUTLINE)} data-view-tab="ready"
                       onClick={() => enterAcrossView("ready")}>
                       <ListChecks className="size-3.5" aria-hidden="true" /> Ready <Badge variant="outline" className="px-1 text-[10px]">{totalReady}</Badge>
                     </Button>
                   </HoverTip>
                   <HoverTip label="In progress">
-                    <Button size="xs" variant={viewMode === "active" ? "outline" : "ghost"} className={cn("h-7 gap-1 px-1.5 text-xs touch:h-9", viewMode === "active" && ACTIVE_FILTER_OUTLINE)} data-view-tab="active"
+                    <Button size="xs" variant={viewMode === "active" ? "outline" : "ghost"} className={cn("h-7 gap-1 px-1.5 text-xs touch:h-8", viewMode === "active" && ACTIVE_FILTER_OUTLINE)} data-view-tab="active"
                       onClick={() => enterAcrossView("active")}>
                       <Activity className="size-3.5" aria-hidden="true" /> Active <Badge variant="outline" className="px-1 text-[10px]">{totalActive}</Badge>
                     </Button>
                   </HoverTip>
                   <HoverTip label="Stage board">
-                    <Button size="xs" variant={viewMode === "board" ? "outline" : "ghost"} className={cn("h-7 gap-1 px-1.5 text-xs touch:h-9", viewMode === "board" && ACTIVE_FILTER_OUTLINE)} data-view-tab="board"
+                    <Button size="xs" variant={viewMode === "board" ? "outline" : "ghost"} className={cn("h-7 gap-1 px-1.5 text-xs touch:h-8", viewMode === "board" && ACTIVE_FILTER_OUTLINE)} data-view-tab="board"
                       onClick={() => setViewMode("board")}>
                       <Columns3 className="size-3.5" aria-hidden="true" /> Board <Badge variant="outline" className="px-1 text-[10px]">{boardRows.length}</Badge>
                     </Button>
@@ -672,7 +672,7 @@ export function GoalsView() {
                         size="xs"
                         variant="outline"
                         data-clear-filters="true"
-                        className="h-7 border-border/80 px-1.5 text-[11px] text-muted-foreground hover:text-foreground touch:h-9"
+                        className="h-7 border-border/80 px-1.5 text-[11px] text-muted-foreground hover:text-foreground touch:h-8"
                         onClick={clearViewFilters}
                       >
                         Reset
@@ -693,28 +693,28 @@ export function GoalsView() {
                     value={activeGoal}
                     onChange={(value) => (viewMode === "board" ? setBoardGoal(value) : setGoalFilter(value))}
                     options={withChoice("All goals", goalOptions)}
-                    className={activeGoal ? ACTIVE_FILTER_OUTLINE : undefined}
+                    className={cn("h-8 touch:h-9 touch:min-h-9", activeGoal && ACTIVE_FILTER_OUTLINE)}
                   />
                   <SearchableSelect
                     label="Filter by state"
                     value={stateFilter}
                     onChange={setStateFilter}
                     options={withChoice("Any state", stateOptions)}
-                    className={stateFilter ? ACTIVE_FILTER_OUTLINE : undefined}
+                    className={cn("h-8 touch:h-9 touch:min-h-9", stateFilter && ACTIVE_FILTER_OUTLINE)}
                   />
                   <SearchableSelect
                     label="Filter by stage"
                     value={stageFilter}
                     onChange={setStageFilter}
                     options={withChoice("Any stage", [...stageOptions, { value: "-", label: "No stage / malformed" }])}
-                    className={stageFilter ? ACTIVE_FILTER_OUTLINE : undefined}
+                    className={cn("h-8 touch:h-9 touch:min-h-9", stageFilter && ACTIVE_FILTER_OUTLINE)}
                   />
                   <SearchableSelect
                     label="Filter by owner"
                     value={ownerFilter}
                     onChange={setOwnerFilter}
                     options={withChoice("Any owner", [{ value: "-", label: "Unassigned" }, ...personOptions])}
-                    className={ownerFilter ? ACTIVE_FILTER_OUTLINE : undefined}
+                    className={cn("h-8 touch:h-9 touch:min-h-9", ownerFilter && ACTIVE_FILTER_OUTLINE)}
                   />
                   <SearchableSelect
                     label="Filter by priority"
@@ -724,7 +724,7 @@ export function GoalsView() {
                       value: opt.value,
                       label: `${opt.label} (${priorityCounts[opt.value]})`,
                     })))}
-                    className={priorityFilter ? ACTIVE_FILTER_OUTLINE : undefined}
+                    className={cn("h-8 touch:h-9 touch:min-h-9", priorityFilter && ACTIVE_FILTER_OUTLINE)}
                   />
                 </div>
               </div>
@@ -804,16 +804,16 @@ export function GoalsView() {
                           const blockedCount = allInGoal.filter((row) => row.state === "blocked").length;
                           return (
                             <AccordionItem key={group.id} value={group.id} data-goal-section={group.id} className="rounded-xl border border-border/80 bg-card ring-0">
-                              <div className="flex flex-wrap items-center gap-1 pr-2">
-                                <AccordionTrigger className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1 pr-2">
+                                <AccordionTrigger className="min-w-0 flex-1 flex-wrap gap-x-1.5 gap-y-1 px-2.5 sm:flex-nowrap sm:gap-2 sm:px-3">
                                   <Badge variant="outline" className="font-mono">{group.id}</Badge>
-                                  <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{plainTaskTitle(group.title)}</span>
+                                  <span className="order-last basis-full break-words sm:order-none sm:min-w-0 sm:flex-1 sm:basis-auto sm:[overflow-wrap:anywhere]">{plainTaskTitle(group.title)}</span>
                                   {blockedCount > 0 && (
                                     <Badge variant="secondary" className={cn("tabular-nums", GOAL_STATE_STYLE.blocked.cls)}>
                                       {blockedCount} blocked
                                     </Badge>
                                   )}
-                                  <Badge variant="secondary" className="tabular-nums" aria-label={`${items.length} tasks`}>{items.length}</Badge>
+                                  <Badge variant="secondary" className="ml-auto tabular-nums sm:ml-0" aria-label={`${items.length} tasks`}>{items.length}</Badge>
                                 </AccordionTrigger>
                                 <HoverTip label={`Open ${group.id} 6-stage board`}>
                                   <Button

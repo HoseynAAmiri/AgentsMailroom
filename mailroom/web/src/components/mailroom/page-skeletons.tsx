@@ -17,28 +17,28 @@ export {
   type MailSkeletonVariant,
 };
 
-export const MAIL_THREAD_LIST_HEADER_CLS = "flex items-center gap-2 border-b px-3 py-2.5";
-export const MAIL_READING_TOOLBAR_CLS = "flex items-center gap-0.5 border-b px-1.5 py-1.5 sm:px-3";
-export const STATUS_HEADER_CLS = "border-b px-3 py-2.5 sm:px-4";
+export const MAIL_THREAD_LIST_HEADER_CLS = "flex items-center gap-1.5 border-b px-2.5 py-2 sm:gap-2 sm:px-3 sm:py-2.5";
+export const MAIL_READING_TOOLBAR_CLS = "flex items-center gap-0.5 border-b px-1.5 py-1 sm:px-3 sm:py-1.5";
+export const STATUS_HEADER_CLS = "border-b px-3 py-2 sm:px-4 sm:py-2.5";
 
-export const GOALS_HEADER_CLS = "flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b bg-card/40 px-3 py-2 sm:px-5";
-export const GOALS_TOP_BAR_CLS = "mb-2.5 flex flex-wrap items-center gap-1 rounded-lg border border-border/80 bg-card/60 px-2 py-1.5";
-export const GOALS_TAB_ROW_CLS = "flex flex-wrap items-center gap-0.5 min-[1360px]:gap-1";
-export const GOALS_FILTER_GRID_CLS = "mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5";
+export const GOALS_HEADER_CLS = "flex min-h-11 shrink-0 flex-wrap items-center gap-2 border-b bg-card/40 px-3 py-1.5 sm:min-h-12 sm:px-5";
+export const GOALS_TOP_BAR_CLS = "mb-2 flex flex-wrap items-center gap-1 rounded-lg border border-border/80 bg-card/60 px-1.5 py-1 sm:mb-2.5 sm:px-2 sm:py-1.5";
+export const GOALS_TAB_ROW_CLS = "contents sm:flex sm:flex-wrap sm:items-center sm:gap-0.5 min-[1360px]:gap-1";
+export const GOALS_FILTER_GRID_CLS = "mb-2 grid grid-cols-2 gap-1.5 sm:mb-3 sm:grid-cols-3 sm:gap-2 lg:grid-cols-5";
 export const GOALS_BOARD_GRID_CLS = "grid min-h-0 flex-1 min-w-0 grid-flow-col auto-cols-[14rem] grid-rows-[minmax(0,1fr)] items-stretch gap-2 overflow-x-auto overflow-y-hidden p-0.5";
 export const GOALS_BOARD_DESKTOP_COLS_6 = "min-[1100px]:grid-flow-row min-[1100px]:grid-cols-6 min-[1100px]:auto-cols-auto min-[1100px]:overflow-x-visible";
 export const GOALS_BOARD_DESKTOP_COLS_7 = "min-[1280px]:grid-flow-row min-[1280px]:grid-cols-7 min-[1280px]:auto-cols-auto min-[1280px]:overflow-x-visible";
 
-export const TEAM_CONTAINER_CLS = "mx-auto max-w-6xl space-y-8 p-3 pb-8 sm:space-y-10 sm:p-6";
-export const HEALTH_STRIP_GRID_CLS = "grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-5";
+export const TEAM_CONTAINER_CLS = "mx-auto max-w-6xl space-y-6 p-3 pb-6 sm:space-y-8 sm:p-5 sm:pb-8 lg:space-y-10 lg:p-6";
+export const HEALTH_STRIP_GRID_CLS = "grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 lg:grid-cols-5";
 export const AGENT_CARDS_GRID_CLS = "grid gap-4 sm:grid-cols-2 xl:grid-cols-3";
 export const ROUTES_GRID_CLS = "grid gap-2 sm:grid-cols-2 xl:grid-cols-3";
 
-export const MACHINE_CONTAINER_CLS = "mx-auto max-w-5xl space-y-8 p-3 pb-8 sm:p-6";
+export const MACHINE_CONTAINER_CLS = "mx-auto max-w-5xl space-y-6 p-3 pb-6 sm:space-y-8 sm:p-5 sm:pb-8 lg:p-6";
 export const MACHINES_GRID_CLS = "grid gap-4 md:grid-cols-2";
 
-export const FILES_HEADER_CLS = "flex items-center gap-2 border-b px-3 py-2.5 sm:px-4";
-export const FILES_TOOLBAR_CLS = "flex flex-wrap items-center gap-1.5 border-b px-3 py-2 sm:px-4";
+export const FILES_HEADER_CLS = "flex items-center gap-2 border-b px-3 py-2 sm:px-4";
+export const FILES_TOOLBAR_CLS = "flex flex-wrap items-center gap-1.5 border-b px-3 py-1.5 sm:px-4 sm:py-2";
 
 export function Bone({ className }: { className?: string }) {
   return <div className={cn("motion-safe:animate-pulse rounded bg-muted", className)} />;
@@ -122,7 +122,7 @@ export function StatusFeedSkeleton() {
     <div data-skeleton-pane="status" className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className={STATUS_HEADER_CLS}>
         <div className="flex items-center gap-2">
-          <Bone className="size-7 shrink-0 rounded-md lg:hidden" />
+          <Bone className="size-7 shrink-0 rounded-md lg:hidden touch:size-9" />
           <Bone className="h-5 w-28" />
         </div>
         <Bone className="mt-1.5 h-3 w-72 max-w-full" />
@@ -159,9 +159,9 @@ export function ThreadListSkeleton({ folder = "all" }: { folder?: FolderId | str
   return (
     <div data-skeleton-pane="list" className="relative flex h-full min-h-0 flex-col overflow-hidden">
       <div className={MAIL_THREAD_LIST_HEADER_CLS}>
-        <Bone className="size-7 shrink-0 rounded-md lg:hidden" />
+        <Bone className="size-7 shrink-0 rounded-md lg:hidden touch:size-8" />
         <Bone className="h-5 w-36 flex-1 max-w-44" />
-        <Bone className="ml-auto h-7 w-24 shrink-0 rounded-lg" />
+        <Bone className="ml-auto h-7 w-24 shrink-0 rounded-lg touch:h-8" />
       </div>
       {variant === "tasks" && (
         <div className="flex flex-wrap gap-1 border-b px-3 py-2">
@@ -185,10 +185,10 @@ export function ReadingPaneSkeleton({ mode = "empty" }: { mode?: ReadingSkeleton
   if (mode === "compose") {
     return (
       <div data-skeleton-pane="reading" data-skeleton-reading="compose" className="flex h-full min-h-0 flex-col overflow-hidden">
-        <div className="flex items-center gap-2 border-b px-3 py-2">
+        <div className="flex items-center gap-2 border-b px-3 py-1.5 sm:py-2">
           <Bone className="size-4 shrink-0" />
           <Bone className="h-4 w-28" />
-          <Bone className="ml-auto size-7 rounded-md" />
+          <Bone className="ml-auto size-7 rounded-md touch:size-9" />
         </div>
         <div className="space-y-2 border-b px-3 py-2">
           <div className="flex items-center gap-2">
@@ -205,7 +205,7 @@ export function ReadingPaneSkeleton({ mode = "empty" }: { mode?: ReadingSkeleton
           <Bone className="h-3.5 w-3/4" />
           <Bone className="h-3.5 w-2/3" />
         </div>
-        <div className="flex items-center justify-between border-t px-3 py-2">
+        <div className="flex items-center justify-between border-t px-3 py-1.5 sm:py-2">
           <Bone className="h-8 w-24 rounded-md" />
           <Bone className="h-8 w-20 rounded-md" />
         </div>
@@ -296,26 +296,26 @@ export function GoalsSkeleton({
       {includeHeader && (
         <header data-skeleton-header="goals" className={GOALS_HEADER_CLS}>
           <Bone className="mr-auto h-6 w-16" />
-          <Bone className="h-9 w-20 rounded-md sm:h-10" />
-          <Bone className="h-9 w-20 rounded-md sm:h-10" />
+          <Bone className="h-8 w-20 rounded-md touch:h-9 sm:h-9" />
+          <Bone className="h-8 w-20 rounded-md touch:h-9 sm:h-9" />
         </header>
       )}
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col px-3 pt-3 pb-2 sm:px-5">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col px-3 pt-2 pb-2 sm:px-5 sm:pt-3">
         <div className="mx-auto w-full max-w-7xl shrink-0">
           <div className={GOALS_TOP_BAR_CLS}>
             <div className={GOALS_TAB_ROW_CLS}>
               {["w-[86px]", "w-[106px]", "w-[88px]", "w-[90px]", "w-[92px]"].map((w, i) => (
-                <Bone key={i} className={cn("h-7 rounded-md touch:h-9", w)} />
+                <Bone key={i} className={cn("h-7 rounded-md touch:h-8", w)} />
               ))}
             </div>
             <div className="ml-auto flex shrink-0 items-center gap-1.5">
-              <Bone className="h-2 w-16 rounded-full min-[1360px]:w-28" />
+              <Bone className="h-2 w-12 rounded-full sm:w-16 min-[1360px]:w-28" />
               <Bone className="h-3.5 w-16" />
             </div>
           </div>
           <div className={GOALS_FILTER_GRID_CLS}>
             {Array.from({ length: 5 }, (_, i) => (
-              <Bone key={i} className="h-9 min-h-9 w-full rounded-md touch:h-11 touch:min-h-11" />
+              <Bone key={i} className="h-8 min-h-8 w-full rounded-md touch:h-9 touch:min-h-9" />
             ))}
           </div>
         </div>
@@ -477,7 +477,7 @@ export function TeamSkeleton() {
               key={i}
               className={cn(
                 "rounded-xl border bg-card px-3 py-2.5 sm:px-4 sm:py-3",
-                i === 3 && "order-last col-span-2 sm:order-none sm:col-span-1",
+                i === 3 && "order-last col-span-2 sm:order-none sm:col-span-2 lg:col-span-1",
               )}
             >
               <Bone className="h-3 w-24" />
@@ -663,9 +663,9 @@ export function FilesSkeleton({ includeChrome = false }: { includeChrome?: boole
           ))}
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
-          <Bone className="h-8 w-22 rounded-md" />
-          <Bone className="h-8 w-20 rounded-md" />
-          <Bone className="h-8 w-22 rounded-md" />
+          <Bone className="h-8 w-22 rounded-md touch:h-9" />
+          <Bone className="h-8 w-20 rounded-md touch:h-9" />
+          <Bone className="h-8 w-22 rounded-md touch:h-9" />
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">

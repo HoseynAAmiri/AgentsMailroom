@@ -366,7 +366,7 @@ function HealthStrip() {
         <div className="text-xs text-muted-foreground">Waiting on you</div>
         <div className={cn("mt-1 text-2xl font-semibold tabular-nums", openHuman.length && "text-amber-600")}>{openHuman.length}</div>
       </button>
-      <div className={cn(tile, "order-last col-span-2 sm:order-none sm:col-span-1", notReading.length && "border-amber-300 dark:border-amber-800")}>
+      <div className={cn(tile, "order-last col-span-2 sm:order-none sm:col-span-2 lg:col-span-1", notReading.length && "border-amber-300 dark:border-amber-800")}>
         <div className="text-xs text-muted-foreground">Not reading / unreachable</div>
         <div className={cn("mt-1 truncate text-2xl font-semibold", notReading.length && "text-amber-600")}>
           {notReading.length ? notReading.map((a) => a.id).join(", ") : "none"}

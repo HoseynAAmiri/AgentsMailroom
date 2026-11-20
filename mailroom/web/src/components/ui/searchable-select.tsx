@@ -49,7 +49,7 @@ export function SearchableSelect<Value extends string>({
           type="button"
           size={compact ? "sm" : "lg"}
           variant="outline"
-          className={cn("min-w-0 justify-between touch:min-h-11", compact ? "max-w-44" : "w-full", className)}
+          className={cn("min-w-0 justify-between", compact ? "max-w-44 touch:min-h-9" : "w-full touch:min-h-10", className)}
         />}
       >
         <span className="truncate">{display}</span>

@@ -180,7 +180,7 @@ function ArchiveOlder() {
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
       <Tooltip>
-        <TooltipTrigger render={<AlertDialogTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Archive older conversations" />} />}>
+        <TooltipTrigger render={<AlertDialogTrigger render={<Button variant="ghost" size="icon-sm" className="touch:size-8" aria-label="Archive older conversations" />} />}>
           <Archive />
         </TooltipTrigger>
         <TooltipContent>Archive older conversations</TooltipContent>
@@ -253,7 +253,7 @@ export function ThreadList() {
   return (
     <div className="flex h-full flex-col">
       <div className={MAIL_THREAD_LIST_HEADER_CLS}>
-        <Button variant="ghost" size="icon-sm" aria-label="Folders" className="-ml-1 lg:hidden" onClick={() => setNavOpen(true)}>
+        <Button variant="ghost" size="icon-sm" aria-label="Folders" className="-ml-1 lg:hidden touch:size-8" onClick={() => setNavOpen(true)}>
           <Menu />
         </Button>
         <h2 className="min-w-0 flex-1 truncate text-base font-semibold">{folderTitle(folder, agentName)}</h2>
@@ -267,7 +267,7 @@ export function ThreadList() {
               aria-selected={unreadOnly === u}
               onClick={() => setUnreadOnly(u)}
               className={cn(
-                "inline-flex h-6 items-center rounded-md px-2 text-xs font-semibold transition-colors touch:h-8",
+                "inline-flex h-6 items-center rounded-md px-1.5 text-xs font-semibold transition-colors sm:px-2 touch:h-7",
                 unreadOnly === u ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
               )}
             >
@@ -283,6 +283,7 @@ export function ThreadList() {
                   variant="ghost"
                   size="icon-sm"
                   aria-label="Mark all as read"
+                  className="touch:size-8"
                   onClick={() => mark("read", list.flatMap((t) => t.events.filter(ms.isUnread).map((e) => e.id)))}
                 />
               }
@@ -294,7 +295,7 @@ export function ThreadList() {
         )}
       </div>
       {folder === "tasks" && (
-        <div className="flex flex-wrap gap-1 border-b px-3 py-2">
+        <div className="flex flex-wrap gap-1 border-b px-3 py-1.5 sm:py-2">
           {TASK_FILTERS.map((f) => (
             <button
               key={f.key}
