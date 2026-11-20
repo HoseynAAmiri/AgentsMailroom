@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { ArrowDown, ArrowLeft, ArrowUp, ArrowUpToLine, ChevronRight, CircleCheck, Columns3, FileText, Link2, ListChecks, ListFilter, MessageSquare, MoreHorizontal, Plus, Tag, Target, TriangleAlert, Upload, X } from "lucide-react";
+import { Activity, ArrowDown, ArrowLeft, ArrowUp, ArrowUpToLine, ChevronRight, CircleCheck, Columns3, FileText, Link2, ListChecks, ListFilter, MessageSquare, MoreHorizontal, Plus, Tag, Target, TriangleAlert, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SearchableSelect, type SearchOption } from "@/components/ui/searchable-select";
 import { useBackLayer } from "@/hooks/use-back-layer";
 import { api, fileHref } from "@/lib/api";
-import { GOAL_STATE_STYLE, TASK_STAGES, extractTaskDocLinks, isTaskReadyNext, parseTaskStage, plainTaskTitle, sortTasksByPriority, type TaskDocFolder } from "@/lib/format";
+import { GOAL_STATE_STYLE, TASK_STAGES, extractTaskDocLinks, isTaskInProgress, isTaskReadyNext, parseTaskStage, plainTaskTitle, sortTasksByPriority, type TaskDocFolder } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useMailroom } from "@/components/mailroom/context";
 import { DecisionBadge, GoalsBoard, PriorityBadge, StageBadge, StateBadge, TaskDocFooter, titleParts, type GoalSummary as Goal, type GoalTask as Task } from "@/components/goals/goals-board";
@@ -33,7 +33,7 @@ interface Evidence {
   file_total: number;
 }
 type Edit = { kind: "goal" | "task"; id?: string; revision?: number; fields: Record<string, string | boolean> };
-type GoalsViewMode = "goals" | "decisions" | "ready" | "board";
+type GoalsViewMode = "goals" | "decisions" | "ready" | "active" | "board";
 const textClass = "text-sm text-muted-foreground";
 const pageSize = 30;
 const stateOptions = Object.entries(GOAL_STATE_STYLE).map(([value, { label }]) => ({ value, label }));
@@ -146,6 +146,7 @@ export function GoalsView() {
   const [data, setData] = useState<Tracker>();
   const [error, setError] = useState("");
   const [goalFilter, setGoalFilter] = useState("");
+  const [boardGoal, setBoardGoal] = useState("");
   const [stateFilter, setStateFilter] = useState("");
   const [stageFilter, setStageFilter] = useState("");
   const [ownerFilter, setOwnerFilter] = useState("");
@@ -213,31 +214,48 @@ export function GoalsView() {
   useBackLayer(!!remove, () => setRemove(undefined));
   useBackLayer(!!browseFolder, () => setBrowseFolder(null));
 
-  const goal = data?.goals.find((row) => row.id === goalFilter);
+  const activeGoal = viewMode === "board" ? boardGoal : goalFilter;
+  const goal = data?.goals.find((row) => row.id === activeGoal);
   const task = data?.tasks.find((row) => row.id === selected);
-  const baseWithoutPriority = useMemo(() => data?.tasks.filter((row) => {
+  const sharedWithoutPriority = useMemo(() => data?.tasks.filter((row) => {
     const query = search.trim().toLowerCase();
     const { stage } = parseTaskStage(row.next_action);
-    return (!goalFilter || row.goal_id === goalFilter)
-      && (!stateFilter || row.state === stateFilter)
+    return (!stateFilter || row.state === stateFilter)
       && (!stageFilter || (stageFilter === "-" ? !stage : stage === stageFilter))
       && (!ownerFilter || row.owner === (ownerFilter === "-" ? "" : ownerFilter))
       && (!query || [row.id, row.title, row.notes, row.next_action, row.blocker].some((value) => value.toLowerCase().includes(query)));
-  }) ?? [], [data, goalFilter, stateFilter, stageFilter, ownerFilter, search]);
+  }) ?? [], [data, stateFilter, stageFilter, ownerFilter, search]);
+
+  const listWithoutPriority = useMemo(
+    () => sharedWithoutPriority.filter((row) => !goalFilter || row.goal_id === goalFilter),
+    [sharedWithoutPriority, goalFilter],
+  );
+  const boardWithoutPriority = useMemo(
+    () => sharedWithoutPriority.filter((row) => !boardGoal || row.goal_id === boardGoal),
+    [sharedWithoutPriority, boardGoal],
+  );
 
   const rows = useMemo(
-    () => sortTasksByPriority(baseWithoutPriority.filter((row) => !priorityFilter || row.priority === priorityFilter)),
-    [baseWithoutPriority, priorityFilter],
+    () => sortTasksByPriority(listWithoutPriority.filter((row) => !priorityFilter || row.priority === priorityFilter)),
+    [listWithoutPriority, priorityFilter],
+  );
+  const boardRows = useMemo(
+    () => sortTasksByPriority(boardWithoutPriority.filter((row) => !priorityFilter || row.priority === priorityFilter)),
+    [boardWithoutPriority, priorityFilter],
   );
   const decisionRows = useMemo(() => rows.filter((row) => !!row.decision), [rows]);
   const readyRows = useMemo(() => rows.filter((row) => isTaskReadyNext(row)), [rows]);
+  const activeRows = useMemo(() => rows.filter((row) => isTaskInProgress(row)), [rows]);
   const totalDecisions = useMemo(() => data?.tasks.filter((row) => !!row.decision).length ?? 0, [data?.tasks]);
   const totalReady = useMemo(() => data?.tasks.filter((row) => isTaskReadyNext(row)).length ?? 0, [data?.tasks]);
+  const totalActive = useMemo(() => data?.tasks.filter((row) => isTaskInProgress(row)).length ?? 0, [data?.tasks]);
   const priorityBase = useMemo(() => {
-    if (viewMode === "decisions") return baseWithoutPriority.filter((row) => !!row.decision);
-    if (viewMode === "ready") return baseWithoutPriority.filter((row) => isTaskReadyNext(row));
-    return baseWithoutPriority;
-  }, [baseWithoutPriority, viewMode]);
+    if (viewMode === "decisions") return listWithoutPriority.filter((row) => !!row.decision);
+    if (viewMode === "ready") return listWithoutPriority.filter((row) => isTaskReadyNext(row));
+    if (viewMode === "active") return listWithoutPriority.filter((row) => isTaskInProgress(row));
+    if (viewMode === "board") return boardWithoutPriority;
+    return listWithoutPriority;
+  }, [boardWithoutPriority, listWithoutPriority, viewMode]);
   const priorityCounts = useMemo(() => {
     const counts = { "": priorityBase.length, high: 0, normal: 0, low: 0 };
     for (const row of priorityBase) {
@@ -279,13 +297,32 @@ export function GoalsView() {
     return mutate(body, success).catch((cause: Error) => { toast.error(cause.message); return undefined; });
   }
 
+  function enterAcrossView(mode: "goals" | "decisions" | "ready" | "active") {
+    setGoalFilter("");
+    setViewMode(mode);
+  }
+
+  function openGoalBoard(goalId: string) {
+    setBoardGoal(goalId);
+    setViewMode("board");
+  }
+
+  function clearViewFilters() {
+    if (viewMode === "board") setBoardGoal("");
+    else setGoalFilter("");
+    setStateFilter("");
+    setStageFilter("");
+    setOwnerFilter("");
+    setPriorityFilter("");
+  }
+
   function openEditor(kind: Edit["kind"], value?: Goal | Task) {
     setEditError("");
     const item = value && "state" in value ? value : undefined;
     setEdit({
       kind, id: value?.id, revision: value?.revision,
       fields: kind === "goal" ? { title: value?.title ?? "" } : {
-        title: item?.title ?? "", goal_id: item?.goal_id ?? (goalFilter || data?.goals[0]?.id || ""),
+        title: item?.title ?? "", goal_id: item?.goal_id ?? (activeGoal || data?.goals[0]?.id || ""),
         state: item?.state ?? "todo", owner: item?.owner ?? "", priority: item?.priority ?? "normal",
         next_action: item?.next_action ?? "", blocker: item?.blocker ?? "", notes: item?.notes ?? "", decision: !!item?.decision,
       },
@@ -338,6 +375,49 @@ export function GoalsView() {
   const detailDocLinks = task ? extractTaskDocLinks([...(task.links ?? []), ...(evidence?.files ?? [])], task.id) : null;
   const withChoice = (label: string, options: SearchOption[]): SearchOption[] => [{ value: "", label }, ...options];
 
+  const activeFilterChips: { key: string; label: string; onClear?: () => void }[] = [
+    ...(activeGoal ? [{
+      key: "goal",
+      label: `Goal: ${activeGoal}`,
+      onClear: () => (viewMode === "board" ? setBoardGoal("") : setGoalFilter("")),
+    }] : []),
+    ...(priorityFilter ? [{
+      key: "priority",
+      label: `Priority: ${priorityFilter[0].toUpperCase() + priorityFilter.slice(1)}`,
+      onClear: () => setPriorityFilter(""),
+    }] : []),
+    ...(stateFilter ? [{
+      key: "state",
+      label: `State: ${GOAL_STATE_STYLE[stateFilter as keyof typeof GOAL_STATE_STYLE]?.label ?? stateFilter}`,
+      onClear: () => setStateFilter(""),
+    }] : []),
+    ...(stageFilter ? [{
+      key: "stage",
+      label: `Stage: ${stageFilter === "-" ? "No stage / malformed" : stageFilter}`,
+      onClear: () => setStageFilter(""),
+    }] : []),
+    ...(ownerFilter ? [{
+      key: "owner",
+      label: `Owner: ${ownerFilter === "-" ? "Unassigned" : ownerFilter === "user" ? "USER" : ownerFilter}`,
+      onClear: () => setOwnerFilter(""),
+    }] : []),
+    ...(search.trim() ? [{
+      key: "search",
+      label: `Search: "${search.trim()}"`,
+    }] : []),
+  ];
+
+  const queueCounts = viewMode === "decisions"
+    ? { visible: decisionRows.length, total: totalDecisions }
+    : viewMode === "ready"
+      ? { visible: readyRows.length, total: totalReady }
+      : viewMode === "active"
+        ? { visible: activeRows.length, total: totalActive }
+        : viewMode === "board"
+          ? { visible: boardRows.length, total: data?.tasks.length ?? 0 }
+          : { visible: rows.length, total: data?.tasks.length ?? 0 };
+  const hasClearableFilters = !!(activeGoal || stateFilter || stageFilter || ownerFilter || priorityFilter);
+
   function renderDocFileItem(file: string, canUnlink: boolean) {
     const href = fileHref(file);
     if (!href) return null;
@@ -382,20 +462,24 @@ export function GoalsView() {
               <div className="mb-3 space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <Button size="sm" variant={viewMode === "goals" ? "secondary" : "ghost"} className="h-10 touch:h-11" data-view-tab="goals"
-                    onClick={() => { setGoalFilter(""); setViewMode("goals"); }}>
+                    onClick={() => enterAcrossView("goals")}>
                     <Target /> Goals <Badge variant="outline">{data.goals.length}</Badge>
                   </Button>
                   <Button size="sm" variant={viewMode === "decisions" ? "secondary" : "ghost"} className="h-10 touch:h-11" data-view-tab="decisions"
-                    onClick={() => setViewMode("decisions")}>
+                    onClick={() => enterAcrossView("decisions")}>
                     <TriangleAlert /> Needs your decision <Badge variant="outline">{totalDecisions}</Badge>
                   </Button>
                   <Button size="sm" variant={viewMode === "ready" ? "secondary" : "ghost"} className="h-10 touch:h-11" data-view-tab="ready"
-                    onClick={() => setViewMode("ready")}>
+                    onClick={() => enterAcrossView("ready")}>
                     <ListChecks /> Ready next <Badge variant="outline">{totalReady}</Badge>
+                  </Button>
+                  <Button size="sm" variant={viewMode === "active" ? "secondary" : "ghost"} className="h-10 touch:h-11" data-view-tab="active"
+                    onClick={() => enterAcrossView("active")}>
+                    <Activity /> In progress <Badge variant="outline">{totalActive}</Badge>
                   </Button>
                   <Button size="sm" variant={viewMode === "board" ? "secondary" : "ghost"} className="h-10 touch:h-11" data-view-tab="board"
                     onClick={() => setViewMode("board")}>
-                    <Columns3 /> Stage board <Badge variant="outline">{rows.length}</Badge>
+                    <Columns3 /> Stage board <Badge variant="outline">{boardRows.length}</Badge>
                   </Button>
                   <Button size="icon" variant={showFilters ? "secondary" : "ghost"} className="size-10 touch:size-11" aria-label="Filters" aria-expanded={showFilters}
                     title="Filters" onClick={() => setShowFilters((value) => !value)}><ListFilter /></Button>
@@ -423,9 +507,48 @@ export function GoalsView() {
                     );
                   })}
                 </div>
+                {activeFilterChips.length > 0 && (
+                  <div data-active-filters="true" className="flex flex-wrap items-center gap-1.5 rounded-lg border bg-muted/20 px-2.5 py-1.5 text-xs">
+                    <span className="font-medium text-muted-foreground tabular-nums">
+                      Showing {queueCounts.visible} of {queueCounts.total}
+                    </span>
+                    {activeFilterChips.map((chip) => (
+                      <Badge key={chip.key} variant="secondary" data-filter-chip={chip.key} className="gap-1 pr-1 font-normal">
+                        <span>{chip.label}</span>
+                        {chip.onClear && (
+                          <button
+                            type="button"
+                            aria-label={`Remove ${chip.label} filter`}
+                            onClick={chip.onClear}
+                            className="inline-flex size-4 items-center justify-center rounded-full hover:bg-foreground/10"
+                          >
+                            <X className="size-3" aria-hidden="true" />
+                          </button>
+                        )}
+                      </Badge>
+                    ))}
+                    {hasClearableFilters && (
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="ghost"
+                        data-clear-filters="true"
+                        className="ml-auto h-6 px-2 text-xs"
+                        onClick={clearViewFilters}
+                      >
+                        Clear filters
+                      </Button>
+                    )}
+                  </div>
+                )}
               </div>
               {showFilters && <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 min-[900px]:grid-cols-2" aria-label="Task filters">
-                <SearchableSelect label="Filter by goal" value={goalFilter} onChange={setGoalFilter} options={withChoice("All goals", goalOptions)} />
+                <SearchableSelect
+                  label="Filter by goal"
+                  value={activeGoal}
+                  onChange={(value) => (viewMode === "board" ? setBoardGoal(value) : setGoalFilter(value))}
+                  options={withChoice("All goals", goalOptions)}
+                />
                 <SearchableSelect label="Filter by state" value={stateFilter} onChange={setStateFilter} options={withChoice("Any state", stateOptions)} />
                 <SearchableSelect label="Filter by stage" value={stageFilter} onChange={setStageFilter}
                   options={withChoice("Any stage", [...stageOptions, { value: "-", label: "No stage / malformed" }])} />
@@ -439,9 +562,10 @@ export function GoalsView() {
                       <Button
                         type="button"
                         size="xs"
-                        variant={!goalFilter ? "secondary" : "outline"}
+                        variant={!boardGoal ? "secondary" : "outline"}
+                        data-board-goal=""
                         className="h-7 px-2 text-xs"
-                        onClick={() => setGoalFilter("")}
+                        onClick={() => setBoardGoal("")}
                       >
                         All goals ({data.tasks.length})
                       </Button>
@@ -450,10 +574,10 @@ export function GoalsView() {
                           key={g.id}
                           type="button"
                           size="xs"
-                          variant={goalFilter === g.id ? "secondary" : "outline"}
+                          variant={boardGoal === g.id ? "secondary" : "outline"}
                           data-board-goal={g.id}
                           className="h-7 px-2 font-mono text-xs"
-                          onClick={() => setGoalFilter(goalFilter === g.id ? "" : g.id)}
+                          onClick={() => setBoardGoal(boardGoal === g.id ? "" : g.id)}
                         >
                           {g.id}
                         </Button>
@@ -465,8 +589,8 @@ export function GoalsView() {
                       </p>
                     )}
                   </div>
-                  {!rows.length && <Card size="sm" className="mb-3"><CardContent className={textClass}>No tasks match.</CardContent></Card>}
-                  <GoalsBoard tasks={rows} selectedId={selected} admin={admin} onSelect={choose} onOpenFile={openFile} onOpenFolder={setBrowseFolder} />
+                  {!boardRows.length && <Card size="sm" className="mb-3"><CardContent className={textClass}>No tasks match.</CardContent></Card>}
+                  <GoalsBoard tasks={boardRows} selectedId={selected} admin={admin} onSelect={choose} onOpenFile={openFile} onOpenFolder={setBrowseFolder} />
                 </>
               ) : viewMode === "decisions" ? (
                 <div className="space-y-3" data-view-panel="decisions">
@@ -485,7 +609,7 @@ export function GoalsView() {
                 </div>
               ) : viewMode === "ready" ? (
                 <div className="space-y-3" data-view-panel="ready">
-                  <p className={textClass}>Actionable tasks across all goals (excludes blocked, done, and tasks waiting on a USER decision), sorted by priority.</p>
+                  <p className={textClass}>Tasks ready to start across all goals (to-do tasks not held on a USER decision), sorted by priority.</p>
                   {readyRows.length > 0 ? (
                     <ul className="space-y-2">
                       {readyRows.map((row) => (
@@ -495,7 +619,22 @@ export function GoalsView() {
                       ))}
                     </ul>
                   ) : (
-                    <Card size="sm"><CardContent className={textClass}>No ready tasks match the current filters.</CardContent></Card>
+                    <Card size="sm"><CardContent className={textClass}>No ready-to-start tasks match the current filters.</CardContent></Card>
+                  )}
+                </div>
+              ) : viewMode === "active" ? (
+                <div className="space-y-3" data-view-panel="active">
+                  <p className={textClass}>Active work in progress across all goals (in-progress tasks not held on a USER decision), sorted by priority.</p>
+                  {activeRows.length > 0 ? (
+                    <ul className="space-y-2">
+                      {activeRows.map((row) => (
+                        <li key={row.id}>
+                          <TaskRowCard task={row} selected={selected === row.id} showGoalBadge admin={admin} onSelect={choose} onOpenFile={openFile} onOpenFolder={setBrowseFolder} />
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <Card size="sm"><CardContent className={textClass}>No active tasks in progress match the current filters.</CardContent></Card>
                   )}
                 </div>
               ) : (
@@ -507,7 +646,7 @@ export function GoalsView() {
                         size="xs"
                         variant={totalDecisions > 0 ? "outline" : "ghost"}
                         className={cn("h-7 gap-1 px-2 text-xs", totalDecisions > 0 && "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300")}
-                        onClick={() => setViewMode("decisions")}
+                        onClick={() => enterAcrossView("decisions")}
                       >
                         <TriangleAlert className="size-3.5" aria-hidden="true" />
                         Needs your decision ({totalDecisions})
@@ -517,10 +656,20 @@ export function GoalsView() {
                         size="xs"
                         variant="outline"
                         className="h-7 gap-1 px-2 text-xs"
-                        onClick={() => setViewMode("ready")}
+                        onClick={() => enterAcrossView("ready")}
                       >
                         <ListChecks className="size-3.5" aria-hidden="true" />
                         Ready next ({totalReady})
+                      </Button>
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="outline"
+                        className="h-7 gap-1 px-2 text-xs"
+                        onClick={() => enterAcrossView("active")}
+                      >
+                        <Activity className="size-3.5" aria-hidden="true" />
+                        In progress ({totalActive})
                       </Button>
                     </div>
                     <div className="flex items-center gap-2">
@@ -571,9 +720,10 @@ export function GoalsView() {
                               type="button"
                               size="xs"
                               variant="outline"
+                              data-open-goal-board={group.id}
                               title={`Open ${group.id} 7-stage board`}
                               className="h-8 gap-1 px-2 text-xs"
-                              onClick={() => { setGoalFilter(group.id); setViewMode("board"); }}
+                              onClick={() => openGoalBoard(group.id)}
                             >
                               <Columns3 className="size-3.5" aria-hidden="true" />
                               <span className="hidden sm:inline">Stage board</span>
@@ -875,7 +1025,7 @@ export function GoalsView() {
               if (!remove) return;
               const goalRemoval = remove.count !== undefined;
               void act({ action: goalRemoval ? "goal-remove" : "remove", id: remove.goal.id, revision: remove.goal.revision, confirm_count: remove.count }, goalRemoval ? "Goal removed" : "Task removed")
-                .then((result) => { if (result) { if (goalRemoval) setGoalFilter(""); choose(""); setRemove(undefined); } });
+                .then((result) => { if (result) { if (goalRemoval) { setGoalFilter(""); setBoardGoal(""); } choose(""); setRemove(undefined); } });
             }}>Remove</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

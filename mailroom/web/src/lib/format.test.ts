@@ -14,6 +14,7 @@ const {
   extractTaskDocLinks,
   groupTasksByStage,
   isFutureOutlier,
+  isTaskInProgress,
   isTaskReadyNext,
   latestActivityTs,
   parseTaskStage,
@@ -414,7 +415,7 @@ test("extractTaskDocLinks classifies goal folders, context, dossier, PDF, and mu
   });
 });
 
-test("sortTasksByPriority and isTaskReadyNext preserve order and exclude blocked, done, and decisions", () => {
+test("sortTasksByPriority, isTaskReadyNext, and isTaskInProgress separate ready-to-start from active work", () => {
   const sample = [
     { id: "A", priority: "low", state: "todo", decision: 0 },
     { id: "B", priority: "normal", state: "doing", decision: 0 },
@@ -422,6 +423,7 @@ test("sortTasksByPriority and isTaskReadyNext preserve order and exclude blocked
     { id: "D", priority: "normal", state: "done", decision: 0 },
     { id: "E", priority: "high", state: "todo", decision: 0 },
     { id: "F", priority: "low", state: "blocked", decision: 0 },
+    { id: "G", priority: "high", state: "doing", decision: 1 },
   ];
   assert.equal(priorityRank("high"), 0);
   assert.equal(priorityRank("normal"), 1);
@@ -429,11 +431,15 @@ test("sortTasksByPriority and isTaskReadyNext preserve order and exclude blocked
   assert.equal(priorityRank("unexpected"), 1);
   assert.deepEqual(
     sortTasksByPriority(sample).map((t) => t.id),
-    ["C", "E", "B", "D", "A", "F"],
+    ["C", "E", "G", "B", "D", "A", "F"],
   );
   assert.deepEqual(
     sample.filter(isTaskReadyNext).map((t) => t.id),
-    ["A", "B", "E"],
+    ["A", "E"],
+  );
+  assert.deepEqual(
+    sample.filter(isTaskInProgress).map((t) => t.id),
+    ["B"],
   );
 });
 

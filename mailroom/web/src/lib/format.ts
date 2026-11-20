@@ -226,9 +226,14 @@ export function sortTasksByPriority<T extends { priority?: string | null }>(task
   return [...tasks].sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority));
 }
 
-/** True when a task is actionable right now (not blocked, not done, and not held on a USER decision). */
+/** True when a task is ready to start next (todo and not held on a USER decision). */
 export function isTaskReadyNext(task: { state: string; decision?: number | boolean | null }): boolean {
-  return task.state !== "blocked" && task.state !== "done" && !task.decision;
+  return task.state === "todo" && !task.decision;
+}
+
+/** True when a task has active work in progress (doing and not held on a USER decision). */
+export function isTaskInProgress(task: { state: string; decision?: number | boolean | null }): boolean {
+  return task.state === "doing" && !task.decision;
 }
 
 export const TASK_STAGES = [
