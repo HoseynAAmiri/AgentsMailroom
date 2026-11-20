@@ -135,6 +135,7 @@ class StandaloneSmoke(unittest.TestCase):
                 self.assertEqual(denied_dir.exception.code, 403)
                 docs_listing = read(admin, "/api/repo-dir?path=docs/goals-and-tasks/G1/g1_1_demo")
                 self.assertEqual(docs_listing["path"], "docs/goals-and-tasks/G1/g1_1_demo")
+                self.assertEqual(docs_listing["abs_path"], str(demo_dir.resolve()))
                 self.assertTrue(any(e["name"] == "context.md" and e["viewable"] for e in docs_listing["entries"]))
                 with self.assertRaises(HTTPError) as bad_dir:
                     read(admin, "/api/repo-dir?path=../bus")

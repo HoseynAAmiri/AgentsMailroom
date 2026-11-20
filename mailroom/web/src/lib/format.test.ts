@@ -23,6 +23,7 @@ const {
   priorityRank,
   resolveActivityNow,
   sortTasksByPriority,
+  summarizeTaskProgress,
 } = (await import(new URL("./format.ts", import.meta.url).href)) as typeof FormatModule;
 
 const NOW = Date.parse("2026-11-19T08:00:00Z");
@@ -482,4 +483,32 @@ test("groupTasksByStage places all 7 canonical stages and preserves malformed/un
       ["T9", "malformed", "review"],
     ],
   );
+});
+
+test("summarizeTaskProgress counts canonical [Result] delivered and [Done] ready-to-deliver", () => {
+  const sample = [
+    ...Array.from({ length: 19 }, (_, idx) => ({ next_action: `[Result] delivered ${idx + 1}` })),
+    { next_action: "[Done] ready to deliver" },
+    ...Array.from({ length: 54 }, (_, idx) => ({ next_action: `[Run] in progress ${idx + 1}` })),
+    { next_action: "plain legacy action" },
+    { next_action: "[result] lowercase should not count as delivered" },
+  ];
+  assert.deepEqual(summarizeTaskProgress(sample), {
+    total: 76,
+    delivered: 19,
+    readyToDeliver: 1,
+    remaining: 56,
+    deliveredPct: 25,
+    deliveredWidthPct: 25,
+    readyWidthPct: (1 / 76) * 100,
+  });
+  assert.deepEqual(summarizeTaskProgress([]), {
+    total: 0,
+    delivered: 0,
+    readyToDeliver: 0,
+    remaining: 0,
+    deliveredPct: 0,
+    deliveredWidthPct: 0,
+    readyWidthPct: 0,
+  });
 });

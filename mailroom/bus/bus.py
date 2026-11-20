@@ -1059,7 +1059,7 @@ def list_repo_dir(rel: str) -> dict[str, Any]:
     parent_dir = target.parent.relative_to(base).as_posix() if target != base else None
     if parent_dir == ".":
         parent_dir = ""
-    return {"path": rel_dir, "parent": parent_dir, "entries": entries}
+    return {"path": rel_dir, "abs_path": str(target), "parent": parent_dir, "entries": entries}
 
 
 # ---------------------------------------------------------------- tasks

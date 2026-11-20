@@ -13,16 +13,15 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SearchableSelect, type SearchOption } from "@/components/ui/searchable-select";
 import { useBackLayer } from "@/hooks/use-back-layer";
 import { api, fileHref } from "@/lib/api";
-import { GOAL_STATE_STYLE, PRIORITY_STYLE, TASK_STAGES, extractTaskDocLinks, isTaskInProgress, isTaskReadyNext, parseTaskStage, plainTaskTitle, sortTasksByPriority, type TaskDocFolder } from "@/lib/format";
+import { GOAL_STATE_STYLE, PRIORITY_STYLE, TASK_STAGES, extractTaskDocLinks, isTaskInProgress, isTaskReadyNext, parseTaskStage, plainTaskTitle, sortTasksByPriority, summarizeTaskProgress, type TaskDocFolder, type TaskProgressSummary } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useMailroom } from "@/components/mailroom/context";
 import { DecisionBadge, GoalsBoard, PriorityFlagControl, StageBadge, StateBadge, titleParts, type GoalSummary as Goal, type GoalTask as Task, type TaskPriority } from "@/components/goals/goals-board";
-import { OpenFolderAction, RepoFolderDialog } from "@/components/viewer/repo-folder-dialog";
+import { CopyFolderPathAction, OpenFolderAction, RepoFolderDialog } from "@/components/viewer/repo-folder-dialog";
 
 interface Tracker { goals: Goal[]; tasks: Task[]; order_revision: number; revision: number }
 interface Evidence {
@@ -45,6 +44,61 @@ const PRIORITY_FILTERS = [
   { value: "normal", label: "Normal" },
   { value: "low", label: "Low" },
 ] as const;
+const ACTIVE_FILTER_OUTLINE = "border-primary bg-primary/15 font-medium text-foreground ring-1 ring-primary/40";
+
+function TaskProgressBar({
+  summary,
+  label,
+  compact = false,
+  className,
+  dataAttr,
+}: {
+  summary: TaskProgressSummary;
+  label: string;
+  compact?: boolean;
+  className?: string;
+  dataAttr?: Record<string, string>;
+}) {
+  return (
+    <div {...dataAttr} className={cn("flex flex-wrap items-center gap-x-3 gap-y-1.5", className)}>
+      <div
+        role="progressbar"
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={summary.deliveredPct}
+        className={cn(
+          "relative flex flex-1 overflow-hidden rounded-full bg-muted",
+          compact ? "h-1.5 min-w-24" : "h-2 min-w-36",
+        )}
+      >
+        {summary.deliveredWidthPct > 0 && (
+          <div
+            className="h-full bg-emerald-500 transition-all"
+            style={{ width: `${summary.deliveredWidthPct}%` }}
+          />
+        )}
+        {summary.readyWidthPct > 0 && (
+          <div
+            className="h-full bg-teal-400/85 transition-all dark:bg-teal-400/75"
+            style={{ width: `${summary.readyWidthPct}%` }}
+          />
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground tabular-nums">
+        <span className="font-medium text-emerald-700 dark:text-emerald-300">
+          {summary.delivered}/{summary.total} delivered ({summary.deliveredPct}%)
+        </span>
+        {(!compact || summary.readyToDeliver > 0) && (
+          <span className="font-medium text-teal-700 dark:text-teal-300">
+            · {summary.readyToDeliver} ready ([Done])
+          </span>
+        )}
+        <span>· {summary.remaining} left</span>
+      </div>
+    </div>
+  );
+}
 
 interface TaskRowCardProps {
   task: Task;
@@ -385,54 +439,14 @@ export function GoalsView() {
     .map((group) => group.id);
   const defaultOpenGroups = goalFilter ? [goalFilter] : anyFilter ? visibleGroupIds : visibleGroupIds.slice(0, 1);
   const openGroups = expandedGroups?.filter === groupFilter ? expandedGroups.ids : defaultOpenGroups;
-  const allExpanded = visibleGroupIds.length > 0 && visibleGroupIds.every((id) => openGroups.includes(id));
   const detail = task ? titleParts(task.title) : { heading: selected === "untagged" ? "Untagged" : "Task unavailable", rest: "" };
   const parsedDetail = task ? parseTaskStage(task.next_action) : null;
   const detailDocLinks = task ? extractTaskDocLinks([...(task.links ?? []), ...(evidence?.files ?? [])], task.id) : null;
   const withChoice = (label: string, options: SearchOption[]): SearchOption[] => [{ value: "", label }, ...options];
 
-  const activeFilterChips: { key: string; label: string; onClear?: () => void }[] = [
-    ...(activeGoal ? [{
-      key: "goal",
-      label: `Goal: ${activeGoal}`,
-      onClear: () => (viewMode === "board" ? setBoardGoal("") : setGoalFilter("")),
-    }] : []),
-    ...(priorityFilter ? [{
-      key: "priority",
-      label: `Priority: ${priorityFilter[0].toUpperCase() + priorityFilter.slice(1)}`,
-      onClear: () => setPriorityFilter(""),
-    }] : []),
-    ...(stateFilter ? [{
-      key: "state",
-      label: `State: ${GOAL_STATE_STYLE[stateFilter as keyof typeof GOAL_STATE_STYLE]?.label ?? stateFilter}`,
-      onClear: () => setStateFilter(""),
-    }] : []),
-    ...(stageFilter ? [{
-      key: "stage",
-      label: `Stage: ${stageFilter === "-" ? "No stage / malformed" : stageFilter}`,
-      onClear: () => setStageFilter(""),
-    }] : []),
-    ...(ownerFilter ? [{
-      key: "owner",
-      label: `Owner: ${ownerFilter === "-" ? "Unassigned" : ownerFilter === "user" ? "USER" : ownerFilter}`,
-      onClear: () => setOwnerFilter(""),
-    }] : []),
-    ...(search.trim() ? [{
-      key: "search",
-      label: `Search: "${search.trim()}"`,
-    }] : []),
-  ];
-
-  const queueCounts = viewMode === "decisions"
-    ? { visible: decisionRows.length, total: totalDecisions }
-    : viewMode === "ready"
-      ? { visible: readyRows.length, total: totalReady }
-      : viewMode === "active"
-        ? { visible: activeRows.length, total: totalActive }
-        : viewMode === "board"
-          ? { visible: boardRows.length, total: data?.tasks.length ?? 0 }
-          : { visible: rows.length, total: data?.tasks.length ?? 0 };
   const hasClearableFilters = !!(activeGoal || stateFilter || stageFilter || ownerFilter || priorityFilter);
+  const dropdownFilterCount = (stateFilter ? 1 : 0) + (stageFilter ? 1 : 0) + (ownerFilter ? 1 : 0) + (viewMode !== "board" && goalFilter ? 1 : 0);
+  const overallProgress = summarizeTaskProgress(data?.tasks ?? []);
 
   function renderDocFileItem(file: string, canUnlink: boolean) {
     const href = fileHref(file);
@@ -477,28 +491,42 @@ export function GoalsView() {
             <div className={cn("min-w-0 px-3 py-4 sm:px-5", viewMode === "board" && !detailOpen ? "w-full" : "mx-auto max-w-6xl")}>
               <div className="mb-3 space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button size="sm" variant={viewMode === "goals" ? "secondary" : "ghost"} className="h-10 touch:h-11" data-view-tab="goals"
+                  <Button size="sm" variant={viewMode === "goals" ? "outline" : "ghost"} className={cn("h-10 touch:h-11", viewMode === "goals" && ACTIVE_FILTER_OUTLINE)} data-view-tab="goals"
                     onClick={() => enterAcrossView("goals")}>
                     <Target /> Goals <Badge variant="outline">{data.goals.length}</Badge>
                   </Button>
-                  <Button size="sm" variant={viewMode === "decisions" ? "secondary" : "ghost"} className="h-10 touch:h-11" data-view-tab="decisions"
+                  <Button size="sm" variant={viewMode === "decisions" ? "outline" : "ghost"} className={cn("h-10 touch:h-11", viewMode === "decisions" && ACTIVE_FILTER_OUTLINE)} data-view-tab="decisions"
                     onClick={() => enterAcrossView("decisions")}>
                     <TriangleAlert /> Needs your decision <Badge variant="outline">{totalDecisions}</Badge>
                   </Button>
-                  <Button size="sm" variant={viewMode === "ready" ? "secondary" : "ghost"} className="h-10 touch:h-11" data-view-tab="ready"
+                  <Button size="sm" variant={viewMode === "ready" ? "outline" : "ghost"} className={cn("h-10 touch:h-11", viewMode === "ready" && ACTIVE_FILTER_OUTLINE)} data-view-tab="ready"
                     onClick={() => enterAcrossView("ready")}>
                     <ListChecks /> Ready next <Badge variant="outline">{totalReady}</Badge>
                   </Button>
-                  <Button size="sm" variant={viewMode === "active" ? "secondary" : "ghost"} className="h-10 touch:h-11" data-view-tab="active"
+                  <Button size="sm" variant={viewMode === "active" ? "outline" : "ghost"} className={cn("h-10 touch:h-11", viewMode === "active" && ACTIVE_FILTER_OUTLINE)} data-view-tab="active"
                     onClick={() => enterAcrossView("active")}>
                     <Activity /> In progress <Badge variant="outline">{totalActive}</Badge>
                   </Button>
-                  <Button size="sm" variant={viewMode === "board" ? "secondary" : "ghost"} className="h-10 touch:h-11" data-view-tab="board"
+                  <Button size="sm" variant={viewMode === "board" ? "outline" : "ghost"} className={cn("h-10 touch:h-11", viewMode === "board" && ACTIVE_FILTER_OUTLINE)} data-view-tab="board"
                     onClick={() => setViewMode("board")}>
                     <Columns3 /> Stage board <Badge variant="outline">{boardRows.length}</Badge>
                   </Button>
-                  <Button size="icon" variant={showFilters ? "secondary" : "ghost"} className="size-10 touch:size-11" aria-label="Filters" aria-expanded={showFilters}
-                    title="Filters" onClick={() => setShowFilters((value) => !value)}><ListFilter /></Button>
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    className={cn(
+                      "size-10 touch:size-11",
+                      (showFilters || dropdownFilterCount > 0)
+                        ? ACTIVE_FILTER_OUTLINE
+                        : "border-transparent bg-transparent hover:border-border/70 hover:bg-muted/60",
+                    )}
+                    aria-label="Filters"
+                    aria-expanded={showFilters}
+                    title="Filters"
+                    onClick={() => setShowFilters((value) => !value)}
+                  >
+                    <ListFilter />
+                  </Button>
                   {admin && <Button size="sm" variant="ghost" className="h-10 touch:h-11" onClick={() => choose("untagged")}><Tag /> Untagged</Button>}
                 </div>
                 <div role="group" aria-label="Filter by priority" className="flex flex-wrap items-center gap-1.5">
@@ -512,10 +540,13 @@ export function GoalsView() {
                         key={opt.value || "all"}
                         type="button"
                         size="xs"
-                        variant={active ? "secondary" : "outline"}
+                        variant="outline"
                         aria-pressed={active}
                         data-priority-filter={opt.value || "all"}
-                        className="h-7 gap-1 px-2 text-xs tabular-nums"
+                        className={cn(
+                          "h-7 gap-1 px-2 text-xs tabular-nums",
+                          active ? ACTIVE_FILTER_OUTLINE : "border-border/80",
+                        )}
                         onClick={() => setPriorityFilter(opt.value)}
                       >
                         {flagStyle && <Flag className={cn("size-3 shrink-0 fill-current", flagStyle.dotCls)} aria-hidden="true" />}
@@ -524,41 +555,25 @@ export function GoalsView() {
                       </Button>
                     );
                   })}
+                  {hasClearableFilters && (
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      data-clear-filters="true"
+                      className="ml-auto h-7 border-border/80 px-2 text-xs text-muted-foreground hover:text-foreground"
+                      onClick={clearViewFilters}
+                    >
+                      Reset filters
+                    </Button>
+                  )}
                 </div>
-                {activeFilterChips.length > 0 && (
-                  <div data-active-filters="true" className="flex flex-wrap items-center gap-1.5 rounded-lg border bg-muted/20 px-2.5 py-1.5 text-xs">
-                    <span className="font-medium text-muted-foreground tabular-nums">
-                      Showing {queueCounts.visible} of {queueCounts.total}
-                    </span>
-                    {activeFilterChips.map((chip) => (
-                      <Badge key={chip.key} variant="secondary" data-filter-chip={chip.key} className="gap-1 pr-1 font-normal">
-                        <span>{chip.label}</span>
-                        {chip.onClear && (
-                          <button
-                            type="button"
-                            aria-label={`Remove ${chip.label} filter`}
-                            onClick={chip.onClear}
-                            className="inline-flex size-4 items-center justify-center rounded-full hover:bg-foreground/10"
-                          >
-                            <X className="size-3" aria-hidden="true" />
-                          </button>
-                        )}
-                      </Badge>
-                    ))}
-                    {hasClearableFilters && (
-                      <Button
-                        type="button"
-                        size="xs"
-                        variant="ghost"
-                        data-clear-filters="true"
-                        className="ml-auto h-6 px-2 text-xs"
-                        onClick={clearViewFilters}
-                      >
-                        Clear filters
-                      </Button>
-                    )}
-                  </div>
-                )}
+                <TaskProgressBar
+                  dataAttr={{ "data-overall-progress": "true" }}
+                  summary={overallProgress}
+                  label="Overall task delivery progress"
+                  className="rounded-lg border border-border/80 bg-muted/20 px-3 py-2"
+                />
               </div>
               {showFilters && <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 min-[900px]:grid-cols-2" aria-label="Task filters">
                 <SearchableSelect
@@ -566,12 +581,29 @@ export function GoalsView() {
                   value={activeGoal}
                   onChange={(value) => (viewMode === "board" ? setBoardGoal(value) : setGoalFilter(value))}
                   options={withChoice("All goals", goalOptions)}
+                  className={activeGoal ? ACTIVE_FILTER_OUTLINE : undefined}
                 />
-                <SearchableSelect label="Filter by state" value={stateFilter} onChange={setStateFilter} options={withChoice("Any state", stateOptions)} />
-                <SearchableSelect label="Filter by stage" value={stageFilter} onChange={setStageFilter}
-                  options={withChoice("Any stage", [...stageOptions, { value: "-", label: "No stage / malformed" }])} />
-                <SearchableSelect label="Filter by owner" value={ownerFilter} onChange={setOwnerFilter}
-                  options={withChoice("Any owner", [{ value: "-", label: "Unassigned" }, ...personOptions])} />
+                <SearchableSelect
+                  label="Filter by state"
+                  value={stateFilter}
+                  onChange={setStateFilter}
+                  options={withChoice("Any state", stateOptions)}
+                  className={stateFilter ? ACTIVE_FILTER_OUTLINE : undefined}
+                />
+                <SearchableSelect
+                  label="Filter by stage"
+                  value={stageFilter}
+                  onChange={setStageFilter}
+                  options={withChoice("Any stage", [...stageOptions, { value: "-", label: "No stage / malformed" }])}
+                  className={stageFilter ? ACTIVE_FILTER_OUTLINE : undefined}
+                />
+                <SearchableSelect
+                  label="Filter by owner"
+                  value={ownerFilter}
+                  onChange={setOwnerFilter}
+                  options={withChoice("Any owner", [{ value: "-", label: "Unassigned" }, ...personOptions])}
+                  className={ownerFilter ? ACTIVE_FILTER_OUTLINE : undefined}
+                />
               </div>}
               {viewMode === "board" ? (
                 <>
@@ -580,9 +612,15 @@ export function GoalsView() {
                       <Button
                         type="button"
                         size="xs"
-                        variant={!boardGoal ? "secondary" : "outline"}
+                        variant="outline"
+                        aria-pressed={!boardGoal}
                         data-board-goal=""
-                        className="h-7 px-2 text-xs"
+                        className={cn(
+                          "h-7 px-2 text-xs",
+                          !boardGoal
+                            ? "border-primary bg-primary/15 font-medium text-foreground ring-1 ring-primary/40"
+                            : "border-border/80",
+                        )}
                         onClick={() => setBoardGoal("")}
                       >
                         All goals ({data.tasks.length})
@@ -592,9 +630,15 @@ export function GoalsView() {
                           key={g.id}
                           type="button"
                           size="xs"
-                          variant={boardGoal === g.id ? "secondary" : "outline"}
+                          variant="outline"
+                          aria-pressed={boardGoal === g.id}
                           data-board-goal={g.id}
-                          className="h-7 px-2 font-mono text-xs"
+                          className={cn(
+                            "h-7 px-2 font-mono text-xs",
+                            boardGoal === g.id
+                              ? "border-primary bg-primary/15 font-medium text-foreground ring-1 ring-primary/40"
+                              : "border-border/80",
+                          )}
                           onClick={() => setBoardGoal(boardGoal === g.id ? "" : g.id)}
                         >
                           {g.id}
@@ -602,19 +646,18 @@ export function GoalsView() {
                       ))}
                     </div>
                     {goal && (
-                      <p className="text-xs text-muted-foreground">
-                        Showing <span className="font-mono font-medium text-foreground">{goal.id}</span> · {plainTaskTitle(goal.title)}
-                      </p>
+                      <div className="space-y-1">
+                        <p className="text-xs text-muted-foreground">
+                          Showing <span className="font-mono font-medium text-foreground">{goal.id}</span> · {plainTaskTitle(goal.title)}
+                        </p>
+                        <TaskProgressBar
+                          dataAttr={{ "data-board-goal-progress": goal.id }}
+                          summary={summarizeTaskProgress(data.tasks.filter((row) => row.goal_id === goal.id))}
+                          label={`${goal.id} progress`}
+                          compact
+                        />
+                      </div>
                     )}
-                    <p data-board-stage-summary="true" className="text-xs text-muted-foreground tabular-nums">
-                      <span className="font-medium text-emerald-700 dark:text-emerald-300">
-                        {boardRows.filter((row) => parseTaskStage(row.next_action).stage === "Result").length} finished &amp; delivered ([Result])
-                      </span>
-                      {" · "}
-                      <span className="font-medium text-teal-700 dark:text-teal-300">
-                        {boardRows.filter((row) => parseTaskStage(row.next_action).stage === "Done").length} ready to deliver ([Done])
-                      </span>
-                    </p>
                   </div>
                   {!boardRows.length && <Card size="sm" className="mb-3"><CardContent className={textClass}>No tasks match.</CardContent></Card>}
                   <GoalsBoard tasks={boardRows} selectedId={selected} admin={admin} busy={busy} onSelect={choose} onChangePriority={handleChangePriority} />
@@ -666,54 +709,6 @@ export function GoalsView() {
                 </div>
               ) : (
                 <div className="space-y-3" data-view-panel="goals">
-                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-muted/25 px-3 py-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button
-                        type="button"
-                        size="xs"
-                        variant={totalDecisions > 0 ? "outline" : "ghost"}
-                        className={cn("h-7 gap-1 px-2 text-xs", totalDecisions > 0 && "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300")}
-                        onClick={() => enterAcrossView("decisions")}
-                      >
-                        <TriangleAlert className="size-3.5" aria-hidden="true" />
-                        Needs your decision ({totalDecisions})
-                      </Button>
-                      <Button
-                        type="button"
-                        size="xs"
-                        variant="outline"
-                        className="h-7 gap-1 px-2 text-xs"
-                        onClick={() => enterAcrossView("ready")}
-                      >
-                        <ListChecks className="size-3.5" aria-hidden="true" />
-                        Ready next ({totalReady})
-                      </Button>
-                      <Button
-                        type="button"
-                        size="xs"
-                        variant="outline"
-                        className="h-7 gap-1 px-2 text-xs"
-                        onClick={() => enterAcrossView("active")}
-                      >
-                        <Activity className="size-3.5" aria-hidden="true" />
-                        In progress ({totalActive})
-                      </Button>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="hidden text-xs text-muted-foreground sm:inline">Sorted High &gt; Normal &gt; Low</span>
-                      {visibleGroupIds.length > 0 && (
-                        <Button
-                          type="button"
-                          size="xs"
-                          variant="ghost"
-                          className="h-7 px-2 text-xs"
-                          onClick={() => setExpandedGroups({ filter: groupFilter, ids: allExpanded ? [] : visibleGroupIds })}
-                        >
-                          {allExpanded ? "Collapse all" : "Expand all"}
-                        </Button>
-                      )}
-                    </div>
-                  </div>
                   <Accordion
                     multiple
                     value={openGroups}
@@ -725,7 +720,7 @@ export function GoalsView() {
                       const items = rows.filter((row) => row.goal_id === group.id);
                       if (!items.length && !goal) return null;
                       const allInGoal = data.tasks.filter((row) => row.goal_id === group.id);
-                      const doneCount = allInGoal.filter((row) => row.state === "done").length;
+                      const goalProgress = summarizeTaskProgress(allInGoal);
                       const blockedCount = allInGoal.filter((row) => row.state === "blocked").length;
                       return (
                         <AccordionItem key={group.id} value={group.id} data-goal-section={group.id} className="rounded-xl border border-border/80 bg-card ring-0">
@@ -733,9 +728,6 @@ export function GoalsView() {
                             <AccordionTrigger className="min-w-0 flex-1">
                               <Badge variant="outline" className="font-mono">{group.id}</Badge>
                               <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{plainTaskTitle(group.title)}</span>
-                              <span className="hidden text-xs text-muted-foreground tabular-nums sm:inline">
-                                {doneCount}/{allInGoal.length} done
-                              </span>
                               {blockedCount > 0 && (
                                 <Badge variant="secondary" className={cn("tabular-nums", GOAL_STATE_STYLE.blocked.cls)}>
                                   {blockedCount} blocked
@@ -766,11 +758,15 @@ export function GoalsView() {
                               </DropdownMenu>
                             )}
                           </div>
-                          <AccordionContent className="space-y-2.5 px-3 pt-1 pb-3">
-                            <Progress
-                              value={allInGoal.length ? 100 * doneCount / allInGoal.length : 0}
-                              aria-label={`${doneCount} of ${allInGoal.length} tasks done`}
+                          <div className="px-3 pb-2">
+                            <TaskProgressBar
+                              dataAttr={{ "data-goal-progress": group.id }}
+                              summary={goalProgress}
+                              label={`${group.id} delivery progress`}
+                              compact
                             />
+                          </div>
+                          <AccordionContent className="space-y-2.5 px-3 pt-1 pb-3">
                             {items.length > 0 ? (
                               <ul className="space-y-2.5 p-0.5">
                                 {items.map((row) => (
@@ -924,12 +920,20 @@ export function GoalsView() {
                           <Upload /> Upload to task
                         </Button>
                         {detailDocLinks && (
-                          <OpenFolderAction
-                            admin={admin}
-                            folders={detailDocLinks.ownedFolders}
-                            onOpenFolder={setBrowseFolder}
-                            size="sm"
-                          />
+                          <>
+                            <OpenFolderAction
+                              admin={admin}
+                              folders={detailDocLinks.ownedFolders}
+                              onOpenFolder={setBrowseFolder}
+                              size="sm"
+                              label="Browse folder"
+                            />
+                            <CopyFolderPathAction
+                              admin={admin}
+                              folders={detailDocLinks.ownedFolders}
+                              size="sm"
+                            />
+                          </>
                         )}
                       </div>
                       <Input type="file" ref={uploadRef} hidden disabled={busy} onChange={async (event) => {

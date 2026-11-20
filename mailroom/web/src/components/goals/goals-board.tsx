@@ -177,7 +177,10 @@ export function PriorityFlagControl({
             data-task-priority={current}
             aria-label={`Priority for ${task.id}: ${style.label}. Change priority`}
             title="Change priority (USER only)"
-            className={cn("h-5 gap-1 rounded-md px-1.5 text-[11px] font-medium", style.cls)}
+            className={cn(
+              "h-6 cursor-pointer gap-1 rounded-md px-2 text-[11px] font-medium transition-[filter,box-shadow] hover:brightness-95 dark:hover:brightness-110 touch:h-8",
+              style.cls,
+            )}
           >
             <Flag className={cn("size-3 fill-current", style.dotCls)} aria-hidden="true" />
             {style.label}

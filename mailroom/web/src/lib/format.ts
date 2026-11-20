@@ -589,3 +589,35 @@ export function gib(bytes?: number | null): string {
   if (!bytes) return "—";
   return `${(bytes / 1073741824).toFixed(2)} GiB`;
 }
+
+export interface TaskProgressSummary {
+  total: number;
+  delivered: number;
+  readyToDeliver: number;
+  remaining: number;
+  deliveredPct: number;
+  deliveredWidthPct: number;
+  readyWidthPct: number;
+}
+
+/** Summarize canonical [Result] delivered and [Done] ready-to-deliver progress on full scope. */
+export function summarizeTaskProgress(tasks: readonly { next_action: string }[]): TaskProgressSummary {
+  const total = tasks.length;
+  let delivered = 0;
+  let readyToDeliver = 0;
+  for (const task of tasks) {
+    const { stage } = parseTaskStage(task.next_action);
+    if (stage === "Result") delivered += 1;
+    else if (stage === "Done") readyToDeliver += 1;
+  }
+  const remaining = Math.max(0, total - delivered - readyToDeliver);
+  return {
+    total,
+    delivered,
+    readyToDeliver,
+    remaining,
+    deliveredPct: total ? Math.round((delivered / total) * 100) : 0,
+    deliveredWidthPct: total ? (delivered / total) * 100 : 0,
+    readyWidthPct: total ? (readyToDeliver / total) * 100 : 0,
+  };
+}

@@ -64,6 +64,7 @@ export interface RepoDirEntry {
 
 export interface RepoDirListing {
   path: string;
+  abs_path?: string;
   parent: string | null;
   entries: RepoDirEntry[];
 }

@@ -319,6 +319,7 @@ class BoundaryAndDefaultsTest(unittest.TestCase):
 
         repo_docs = json.loads(urlopen(f"http://127.0.0.1:{admin}/api/repo-dir?path=docs", timeout=5).read())
         self.assertEqual(repo_docs["path"], "docs")
+        self.assertEqual(repo_docs["abs_path"], str((self.repo / "docs").resolve()))
         entry_names = [e["name"] for e in repo_docs["entries"]]
         self.assertIn("ok.md", entry_names)
         self.assertNotIn("doc_escape_store.md", entry_names)
@@ -329,6 +330,7 @@ class BoundaryAndDefaultsTest(unittest.TestCase):
         self.assertTrue(ok_entry["viewable"])
 
         repo_root = json.loads(urlopen(f"http://127.0.0.1:{admin}/api/repo-dir?path=", timeout=5).read())
+        self.assertEqual(repo_root["abs_path"], str(self.repo.resolve()))
         self.assertNotIn("store", [e["name"] for e in repo_root["entries"]])
 
         for bad_dir in (".secret", "../outside", "store", "docs/dir_escape_store", "docs/dir_escape_store_attach", "docs/ok.md", "docs/missing"):

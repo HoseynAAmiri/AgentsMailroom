@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ArrowUp, ChevronDown, ChevronRight, FileText, Folder, FolderOpen, RefreshCw } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowUp, Check, ChevronDown, ChevronRight, Copy, FileText, Folder, FolderOpen, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,6 +30,33 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fallback below for non-secure or headless contexts.
+    }
+  }
+  if (typeof document === "undefined") return false;
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  document.body.appendChild(textarea);
+  textarea.select();
+  let copied = false;
+  try {
+    copied = document.execCommand("copy");
+  } finally {
+    textarea.remove();
+  }
+  return copied;
+}
+
 interface ListingState {
   forPath: string;
   tick: number;
@@ -47,12 +75,18 @@ function RepoFolderBody({
 }) {
   const [currentPath, setCurrentPath] = useState(rootPath);
   const [reloadTick, setReloadTick] = useState(0);
+  const [copiedForPath, setCopiedForPath] = useState("");
+  const copyTimerRef = useRef<number | null>(null);
   const [state, setState] = useState<ListingState>({
     forPath: "",
     tick: -1,
     data: null,
     error: "",
   });
+
+  useEffect(() => () => {
+    if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -79,6 +113,20 @@ function RepoFolderBody({
   const loading = state.forPath !== currentPath || state.tick !== reloadTick;
   const listing = state.forPath === currentPath ? state.data : null;
   const error = state.forPath === currentPath ? state.error : "";
+  const folderPathToCopy = listing?.abs_path || currentPath;
+  const copiedHere = copiedForPath === folderPathToCopy;
+
+  async function handleCopyCurrentFolder() {
+    const ok = await copyTextToClipboard(folderPathToCopy);
+    if (!ok) {
+      toast.error("Could not copy folder path");
+      return;
+    }
+    setCopiedForPath(folderPathToCopy);
+    if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = window.setTimeout(() => setCopiedForPath(""), 1800);
+    toast.success("Folder path copied");
+  }
 
   const subRel = currentPath.startsWith(`${rootPath}/`) ? currentPath.slice(rootPath.length + 1) : "";
   const subParts = subRel ? subRel.split("/").filter(Boolean) : [];
@@ -104,7 +152,7 @@ function RepoFolderBody({
           <FolderOpen className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <span className="truncate">{title ?? rootPath.split("/").at(-1) ?? rootPath}</span>
         </DialogTitle>
-        <DialogDescription className="truncate font-mono text-xs" title={currentPath}>
+        <DialogDescription className="truncate font-mono text-xs" title={folderPathToCopy}>
           {currentPath}
         </DialogDescription>
       </DialogHeader>
@@ -150,6 +198,18 @@ function RepoFolderBody({
             );
           })}
         </nav>
+        <Button
+          type="button"
+          size="xs"
+          variant="outline"
+          data-copy-folder-path="dialog"
+          title={`Copy folder path: ${folderPathToCopy}`}
+          className="h-6 gap-1 px-2 text-xs"
+          onClick={() => void handleCopyCurrentFolder()}
+        >
+          {copiedHere ? <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" /> : <Copy className="size-3.5" aria-hidden="true" />}
+          {copiedHere ? "Copied" : "Copy folder path"}
+        </Button>
         <Button
           type="button"
           size="icon-xs"
@@ -258,7 +318,7 @@ export function OpenFolderAction({
   admin,
   onOpenFolder,
   size = "xs",
-  label = "Open folder",
+  label = "Browse folder",
 }: {
   folders: readonly TaskDocFolder[];
   admin: boolean;
@@ -280,6 +340,7 @@ export function OpenFolderAction({
         type="button"
         size={size}
         variant="outline"
+        data-browse-folder="true"
         title={`Browse ${only.folder}`}
         className={btnClass}
         onClick={() => onOpenFolder(only)}
@@ -298,6 +359,7 @@ export function OpenFolderAction({
             type="button"
             size={size}
             variant="outline"
+            data-browse-folder="true"
             title="Choose a task folder to browse"
             className={cn(btnClass, "tabular-nums")}
           >
@@ -319,6 +381,106 @@ export function OpenFolderAction({
               onClick={() => onOpenFolder(folder)}
             >
               <FolderOpen className="size-3.5 shrink-0" aria-hidden="true" />
+              <span className="truncate font-mono text-xs">{folder.label}</span>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+export function CopyFolderPathAction({
+  folders,
+  admin,
+  size = "sm",
+}: {
+  folders: readonly TaskDocFolder[];
+  admin: boolean;
+  size?: "xs" | "sm";
+}) {
+  const cacheRef = useRef<Map<string, string>>(new Map());
+  const [copying, setCopying] = useState(false);
+
+  if (!admin || folders.length === 0) return null;
+
+  const btnClass = size === "xs"
+    ? "h-6 gap-1 px-1.5 text-[11px]"
+    : "h-10 gap-1.5 touch:h-11";
+  const iconClass = size === "xs" ? "size-3" : "size-4";
+
+  async function handleCopy(folder: TaskDocFolder) {
+    if (copying) return;
+    setCopying(true);
+    try {
+      let targetPath = cacheRef.current.get(folder.folder);
+      if (!targetPath) {
+        try {
+          const listing = await api.repoDir(folder.folder);
+          targetPath = listing.abs_path || folder.folder;
+          if (listing.abs_path) cacheRef.current.set(folder.folder, listing.abs_path);
+        } catch {
+          targetPath = folder.folder;
+        }
+      }
+      const ok = await copyTextToClipboard(targetPath);
+      if (ok) toast.success("Folder path copied");
+      else toast.error("Could not copy folder path");
+    } finally {
+      setCopying(false);
+    }
+  }
+
+  if (folders.length === 1) {
+    const only = folders[0];
+    return (
+      <Button
+        type="button"
+        size={size}
+        variant="outline"
+        disabled={copying}
+        data-copy-folder-path="documents"
+        title={`Copy folder path for ${only.folder}`}
+        className={btnClass}
+        onClick={() => void handleCopy(only)}
+      >
+        <Copy className={iconClass} aria-hidden="true" />
+        Copy folder path
+      </Button>
+    );
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            type="button"
+            size={size}
+            variant="outline"
+            disabled={copying}
+            data-copy-folder-path="documents"
+            title="Choose a task folder path to copy"
+            className={cn(btnClass, "tabular-nums")}
+          >
+            <Copy className={iconClass} aria-hidden="true" />
+            Copy folder path ({folders.length})
+            <ChevronDown className={iconClass} aria-hidden="true" />
+          </Button>
+        }
+      />
+      <DropdownMenuContent align="start" className="max-h-72 w-72 overflow-y-auto">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="text-[11px]">
+            Copy folder path ({folders.length})
+          </DropdownMenuLabel>
+          {folders.map((folder) => (
+            <DropdownMenuItem
+              key={folder.folder}
+              title={folder.folder}
+              onClick={() => void handleCopy(folder)}
+            >
+              <Copy className="size-3.5 shrink-0" aria-hidden="true" />
               <span className="truncate font-mono text-xs">{folder.label}</span>
             </DropdownMenuItem>
           ))}
