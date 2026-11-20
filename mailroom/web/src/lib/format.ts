@@ -633,3 +633,78 @@ export function summarizeTaskProgress(tasks: readonly { next_action: string }[])
     doneWidthPct: total ? (done / total) * 100 : 0,
   };
 }
+
+export interface RolePresetInfo {
+  label: string;
+  prompt: string;
+}
+
+/** Resolve a case-insensitive role preset key by preset key or preset label. */
+export function findMatchingRolePreset(
+  role: string | null | undefined,
+  roles: Readonly<Record<string, RolePresetInfo>>,
+): string | null {
+  const trimmed = (role ?? "").trim().toLowerCase();
+  if (!trimmed) return null;
+  for (const [key, info] of Object.entries(roles)) {
+    if (key.toLowerCase() === trimmed || info.label.trim().toLowerCase() === trimmed) {
+      return key;
+    }
+  }
+  return null;
+}
+
+/** Apply a role preset pill click, syncing role label and updating default prompt when uncustomized. */
+export function applyRolePresetSelection(
+  form: Partial<Agent>,
+  presetKey: string,
+  roles: Readonly<Record<string, RolePresetInfo>>,
+): Partial<Agent> {
+  const preset = roles[presetKey];
+  if (!preset) return form;
+  const currentPrompt = (form.role_prompt ?? "").trim();
+  const isUneditedOrPresetPrompt = !currentPrompt || Object.values(roles).some((r) => r.prompt.trim() === currentPrompt);
+  return {
+    ...form,
+    role_preset: presetKey,
+    role: preset.label.toLowerCase(),
+    role_prompt: isUneditedOrPresetPrompt ? preset.prompt : form.role_prompt,
+  };
+}
+
+/** Update the Role label text input and sync/clear role_preset when the label matches a preset. */
+export function applyRoleLabelChange(
+  form: Partial<Agent>,
+  roleValue: string,
+  roles: Readonly<Record<string, RolePresetInfo>>,
+): Partial<Agent> {
+  return {
+    ...form,
+    role: roleValue,
+    role_preset: findMatchingRolePreset(roleValue, roles),
+  };
+}
+
+/** Build an `/api/agents` upsert payload with role synced to any valid preset and preset-identical prompt normalized to null. */
+export function buildAgentUpsertPayload(
+  form: Partial<Agent>,
+  roles: Readonly<Record<string, RolePresetInfo>>,
+): Partial<Agent> & { id: string } {
+  const presetKey = form.role_preset && roles[form.role_preset] ? form.role_preset : null;
+  const preset = presetKey ? roles[presetKey] : undefined;
+  const role = preset ? preset.label.toLowerCase() : (form.role?.trim() || "");
+  const rawPrompt = (form.role_prompt ?? "").trim();
+  const rolePrompt = !rawPrompt || (preset && rawPrompt === preset.prompt.trim()) ? null : rawPrompt;
+  return {
+    id: String(form.id ?? "").trim(),
+    name: form.name?.trim(),
+    role,
+    role_preset: presetKey,
+    role_prompt: rolePrompt,
+    machine: form.machine?.trim(),
+    cli: form.cli,
+    session_id: form.session_id?.trim(),
+    workdir: form.workdir?.trim(),
+    notes: form.notes,
+  };
+}

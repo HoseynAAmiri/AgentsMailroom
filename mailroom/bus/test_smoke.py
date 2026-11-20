@@ -140,6 +140,58 @@ class StandaloneSmoke(unittest.TestCase):
                 with self.assertRaises(HTTPError) as bad_dir:
                     read(admin, "/api/repo-dir?path=../bus")
                 self.assertEqual(bad_dir.exception.code, 404)
+
+                agents_file = store / "bus" / "agents.json"
+                seeded_agent = read(admin, "/api/agents", post={
+                    "id": "role_probe",
+                    "name": "Role Probe",
+                    "role": "orchestrator",
+                    "role_preset": "orchestrator",
+                })
+                initial_updated_at = seeded_agent["updated_at"]
+                prev_mtime = agents_file.stat().st_mtime_ns
+                snap_full = read(admin, "/api/snapshot")
+                snap_inc_qs = (
+                    f"/api/snapshot?after={snap_full['last_id']}"
+                    f"&cursor={snap_full['event_cursor']}"
+                    f"&tasks_after={snap_full['tasks_revision']}"
+                )
+
+                updated = read(admin, "/api/agents", post={
+                    "id": "role_probe",
+                    "role": "orchestrator",
+                    "role_preset": "reviewer",
+                })
+                self.assertEqual(updated["role"], "reviewer")
+                self.assertEqual(updated["role_preset"], "reviewer")
+                self.assertEqual(updated["updated_at"], initial_updated_at)
+                self.assertGreater(agents_file.stat().st_mtime_ns, prev_mtime)
+
+                reg_entry = next(a for a in read(admin, "/api/agents")["agents"] if a["id"] == "role_probe")
+                self.assertEqual((reg_entry["role"], reg_entry["role_preset"]), ("reviewer", "reviewer"))
+                snap_after_full = next(a for a in read(admin, "/api/snapshot")["agents"] if a["id"] == "role_probe")
+                snap_after_inc = next(a for a in read(admin, snap_inc_qs)["agents"] if a["id"] == "role_probe")
+                self.assertEqual((snap_after_full["role"], snap_after_full["role_preset"]), ("reviewer", "reviewer"))
+                self.assertEqual((snap_after_inc["role"], snap_after_inc["role_preset"]), ("reviewer", "reviewer"))
+
+                custom_lead = read(admin, "/api/agents", post={
+                    "id": "role_probe",
+                    "role": "custom_lead",
+                    "role_preset": None,
+                })
+                self.assertEqual(custom_lead["role"], "custom_lead")
+                self.assertIsNone(custom_lead["role_preset"])
+
+                read(admin, "/api/agents", post={"id": "role_probe", "role": "orchestrator", "role_preset": "orchestrator"})
+                synced_preset = read(admin, "/api/agents", post={"id": "role_probe", "role": "reviewer"})
+                self.assertEqual((synced_preset["role"], synced_preset["role_preset"]), ("reviewer", "reviewer"))
+                cleared_preset = read(admin, "/api/agents", post={"id": "role_probe", "role": "custom_only"})
+                self.assertEqual(cleared_preset["role"], "custom_only")
+                self.assertIsNone(cleared_preset["role_preset"])
+
+                with self.assertRaises(HTTPError) as bad_preset:
+                    read(admin, "/api/agents", post={"id": "role_probe", "role_preset": "not_a_preset"})
+                self.assertEqual(bad_preset.exception.code, 400)
             finally:
                 server.terminate()
                 try:

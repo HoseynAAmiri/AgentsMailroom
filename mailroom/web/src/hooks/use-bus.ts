@@ -6,13 +6,18 @@ import type { BusEvent, Snapshot, UserState } from "@/lib/types";
 const POLL_MS = 5000;
 type WireSnapshot = Omit<Snapshot, "tasks"> & { tasks?: Snapshot["tasks"] };
 
+export interface RefreshOptions {
+  full?: boolean;
+  background?: boolean;
+}
+
 export interface BusData {
   snap: Snapshot | null;
   events: BusEvent[];
   snapshotReceivedAt: number | null;
   connected: boolean;
   error: string | null;
-  refresh: () => Promise<void>;
+  refresh: (opts?: RefreshOptions) => Promise<void>;
   setUserState: (us: UserState) => void;
 }
 
@@ -26,23 +31,36 @@ export function useBus(): BusData {
   const lastId = useRef<string | null>(null);
   const cursor = useRef<string | null>(null);
   const taskRevision = useRef<string | null>(null);
-  const inflight = useRef(false);
+  const inFlightCount = useRef(0);
+  const requestSeq = useRef(0);
+  const appliedSeq = useRef(0);
   const userStateVersion = useRef(0);
 
-  const refresh = useCallback(async () => {
-    if (inflight.current) return;
-    inflight.current = true;
+  const refresh = useCallback(async (opts?: RefreshOptions) => {
+    if (opts?.background && inFlightCount.current > 0) return;
+    const seq = ++requestSeq.current;
+    inFlightCount.current += 1;
     const requestedVersion = userStateVersion.current;
     try {
       const q = new URLSearchParams();
-      if (lastId.current) q.set("after", lastId.current);
-      if (cursor.current) q.set("cursor", cursor.current);
-      if (taskRevision.current) q.set("tasks_after", taskRevision.current);
+      if (!opts?.full) {
+        if (lastId.current) q.set("after", lastId.current);
+        if (cursor.current) q.set("cursor", cursor.current);
+        if (taskRevision.current) q.set("tasks_after", taskRevision.current);
+      }
       const res = await fetch(`/api/snapshot${q.size ? `?${q}` : ""}`, { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as WireSnapshot;
+      if (seq < appliedSeq.current) return;
+      appliedSeq.current = seq;
       setSnapshotReceivedAt(Date.now());
-      setEvents((prev) => (data.full ? data.events : data.events.length ? [...prev, ...data.events] : prev));
+      setEvents((prev) => {
+        if (data.full) return data.events;
+        if (!data.events.length) return prev;
+        const seen = new Set(prev.map((e) => e.id));
+        const fresh = data.events.filter((e) => !seen.has(e.id));
+        return fresh.length ? [...prev, ...fresh] : prev;
+      });
       lastId.current = data.last_id;
       cursor.current = data.event_cursor ?? null;
       taskRevision.current = data.tasks_revision ?? null;
@@ -56,10 +74,12 @@ export function useBus(): BusData {
       setConnected(true);
       setError(null);
     } catch (err) {
-      setConnected(false);
-      setError(err instanceof Error ? err.message : String(err));
+      if (seq >= appliedSeq.current) {
+        setConnected(false);
+        setError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
-      inflight.current = false;
+      inFlightCount.current = Math.max(0, inFlightCount.current - 1);
     }
   }, []);
 
@@ -69,7 +89,7 @@ export function useBus(): BusData {
       clearInterval(timer);
       if (document.visibilityState !== "visible") return;
       void refresh();
-      timer = setInterval(() => void refresh(), POLL_MS);
+      timer = setInterval(() => void refresh({ background: true }), POLL_MS);
     };
     onVisibilityChange();
     document.addEventListener("visibilitychange", onVisibilityChange);

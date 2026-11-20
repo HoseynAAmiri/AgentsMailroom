@@ -1613,6 +1613,23 @@ def upsert_agent(req: dict[str, Any]) -> dict[str, Any]:
         for k in AGENT_FIELDS:
             if k in req:
                 a[k] = req[k]
+        if "role_preset" in req:
+            raw_preset = req.get("role_preset")
+            preset_key = raw_preset.strip() if isinstance(raw_preset, str) else ""
+            if preset_key:
+                if preset_key not in ROLE_PRESETS:
+                    raise ValueError(f"unknown role_preset {preset_key!r}")
+                a["role_preset"] = preset_key
+                a["role"] = ROLE_PRESETS[preset_key]["label"].lower()
+            else:
+                a["role_preset"] = None
+        elif "role" in req and a.get("role_preset"):
+            role_val = (a.get("role") or "").strip().lower()
+            matched = next(
+                (k for k, v in ROLE_PRESETS.items() if k == role_val or v["label"].lower() == role_val),
+                None,
+            )
+            a["role_preset"] = matched
         if a.get("retired"):
             a["state"] = "offline"
         save_agents(data)

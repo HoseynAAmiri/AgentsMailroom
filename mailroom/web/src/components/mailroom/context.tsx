@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { api, type OutgoingMessage } from "@/lib/api";
-import { useBus, useLocalStorage, useNow } from "@/hooks/use-bus";
+import { useBus, useLocalStorage, useNow, type RefreshOptions } from "@/hooks/use-bus";
 import { pushBack, useBackLayer, useHistoryRoot } from "@/hooks/use-back-layer";
 import {
   buildThreads,
@@ -38,7 +38,7 @@ interface Ctx {
   events: BusEvent[];
   connected: boolean;
   error: string | null;
-  refresh: () => Promise<void>;
+  refresh: (opts?: RefreshOptions) => Promise<void>;
   refreshActiveView: () => Promise<void>;
   registerViewRefresh: (view: View, handler: () => Promise<void>) => () => void;
   agents: Map<string, Agent>;
@@ -161,7 +161,7 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
     };
   }, []);
   const refreshActiveView = useCallback(async () => {
-    await Promise.all([refresh(), viewRefresh.current[view]?.(), view === "mail" && refreshMailTasks()]);
+    await Promise.all([refresh({ full: true }), viewRefresh.current[view]?.(), view === "mail" && refreshMailTasks()]);
   }, [refresh, refreshMailTasks, view]);
   const [folder, setFolderRaw] = useLocalStorage<FolderId>("mr-folder", "all");
   const [selected, setSelected] = useState<string | null>(null);

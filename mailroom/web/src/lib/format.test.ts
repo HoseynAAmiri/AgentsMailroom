@@ -11,9 +11,13 @@ const {
   TASK_STAGES,
   TASK_STAGE_META,
   TASK_STAGE_STYLE,
+  applyRoleLabelChange,
+  applyRolePresetSelection,
+  buildAgentUpsertPayload,
   buildLastActivityMap,
   effectiveState,
   extractTaskDocLinks,
+  findMatchingRolePreset,
   groupTasksByStage,
   isFutureOutlier,
   isTaskInProgress,
@@ -538,4 +542,63 @@ test("resolveTaskFilesFolder picks owned task folder first and falls back to goa
     "docs/goals-and-tasks/G8/g8_3_contrast_runs",
   );
   assert.equal(resolveTaskFilesFolder({ id: "invalid", goal_id: "", links: [] }), null);
+});
+
+test("role preset helpers keep role, role_preset, and role_prompt synchronized", () => {
+  const roles = {
+    orchestrator: { label: "Orchestrator", prompt: "Plan and delegate." },
+    reviewer: { label: "Reviewer", prompt: "Verify and referee." },
+    worker: { label: "Worker", prompt: "Build and run." },
+  };
+
+  assert.equal(findMatchingRolePreset("Reviewer", roles), "reviewer");
+  assert.equal(findMatchingRolePreset("  worker ", roles), "worker");
+  assert.equal(findMatchingRolePreset("debate", roles), null);
+
+  // Selecting a preset pill replaces any prior role label (even custom/stale) and updates unedited prompt.
+  const fromStale = applyRolePresetSelection(
+    { id: "a2", role: "debate", role_preset: "orchestrator", role_prompt: "Plan and delegate." },
+    "reviewer",
+    roles,
+  );
+  assert.equal(fromStale.role, "reviewer");
+  assert.equal(fromStale.role_preset, "reviewer");
+  assert.equal(fromStale.role_prompt, "Verify and referee.");
+
+  // Selecting a preset pill preserves an explicitly customized role prompt.
+  const customPromptKept = applyRolePresetSelection(
+    { id: "a1", role: "orchestrator", role_preset: "orchestrator", role_prompt: "Custom instruction line." },
+    "reviewer",
+    roles,
+  );
+  assert.equal(customPromptKept.role, "reviewer");
+  assert.equal(customPromptKept.role_preset, "reviewer");
+  assert.equal(customPromptKept.role_prompt, "Custom instruction line.");
+
+  // Typing a preset name in the Role label input syncs role_preset; typing a custom role clears it.
+  const typedPreset = applyRoleLabelChange({ id: "a1", role: "orchestrator", role_preset: "orchestrator" }, "Reviewer", roles);
+  assert.equal(typedPreset.role_preset, "reviewer");
+  const typedCustom = applyRoleLabelChange({ id: "a1", role: "reviewer", role_preset: "reviewer" }, "Custom Lead", roles);
+  assert.equal(typedCustom.role_preset, null);
+  assert.equal(typedCustom.role, "Custom Lead");
+
+  // Save payload syncs stale role with valid role_preset and normalizes preset-identical prompt to null.
+  const staleSynced = buildAgentUpsertPayload(
+    { id: " a2 ", name: " Codex ", role: "debate", role_preset: "reviewer", role_prompt: "Verify and referee.", machine: " A " },
+    roles,
+  );
+  assert.equal(staleSynced.id, "a2");
+  assert.equal(staleSynced.name, "Codex");
+  assert.equal(staleSynced.role, "reviewer");
+  assert.equal(staleSynced.role_preset, "reviewer");
+  assert.equal(staleSynced.role_prompt, null);
+
+  // Custom role without preset keeps custom role & trimmed custom prompt.
+  const customSaved = buildAgentUpsertPayload(
+    { id: "a6", role: " Custom Lead ", role_preset: null, role_prompt: "  Special prompt  " },
+    roles,
+  );
+  assert.equal(customSaved.role, "Custom Lead");
+  assert.equal(customSaved.role_preset, null);
+  assert.equal(customSaved.role_prompt, "Special prompt");
 });

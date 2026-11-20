@@ -195,7 +195,7 @@ function AgentCard({ a, subs, onEdit, onConnect, onSession }: { a: Agent; subs: 
   const toggleRetired = async () => {
     try {
       await api.upsertAgent({ id: a.id, retired: !a.retired });
-      await refresh();
+      await refresh({ full: true });
     } catch (err) {
       toast.error(String(err instanceof Error ? err.message : err));
     }
@@ -231,7 +231,6 @@ function AgentCard({ a, subs, onEdit, onConnect, onSession }: { a: Agent; subs: 
       <div className="mt-3 rounded-md bg-muted/50 px-2.5 py-2">
         <div className="flex items-center gap-2 text-xs">
           <Pill className="bg-sky-500/10 text-sky-700 dark:text-sky-300">{preset?.label ?? a.role ?? "no role"}</Pill>
-          {a.role_prompt && preset && <span className="text-muted-foreground">customised</span>}
           {rolePrompt && (
             <Tooltip>
               <TooltipTrigger
@@ -410,7 +409,7 @@ function LinksEditor() {
     setBusy(true);
     try {
       setLinks(await api.setLinks([...links.filter(editable), ...otherLinks]));
-      await refresh();
+      await refresh({ full: true });
       setDirty(false);
       toast.success("Routes saved");
     } catch (err) {
@@ -504,7 +503,7 @@ function TempAgents({ onSession }: { onSession: (id: string) => void }) {
     try {
       await api.stop(id);
       toast.success(`${id} stopped`);
-      await refresh();
+      await refresh({ full: true });
     } catch (err) {
       toast.error(String(err instanceof Error ? err.message : err));
     } finally {
@@ -695,7 +694,7 @@ export function TeamView() {
         <TempAgents onSession={setSessionId} />
         <LinksEditor />
       </div>
-      <AgentDialog open={dialogOpen} onOpenChange={setDialogOpen} agent={editing} />
+      <AgentDialog open={dialogOpen} onOpenChange={(v) => { setDialogOpen(v); if (!v) setEditing(null); }} agent={editing} />
       <ConnectDialog agent={connecting} onClose={() => setConnecting(null)} />
       {sessionId && <SessionDialog key={sessionId} id={sessionId} onClose={() => setSessionId(null)} />}
     </ScrollArea>
