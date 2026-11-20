@@ -228,6 +228,37 @@ class StandaloneSmoke(unittest.TestCase):
                 self.assertIsNone(role_only_switch["role_prompt"])
                 self.assertEqual(bus.role_text(role_only_switch), bus.ROLE_PRESETS["worker"]["prompt"])
 
+                # Explicit cross-preset role_prompt survives unrelated edits, same-role saves, and role switches.
+                read(admin, "/api/agents", post={
+                    "id": "role_probe",
+                    "role": "reviewer",
+                    "role_preset": "reviewer",
+                    "role_prompt": legacy_default,
+                })
+                unrelated_save = read(admin, "/api/agents", post={"id": "role_probe", "name": "Renamed Probe"})
+                self.assertEqual((unrelated_save["role"], unrelated_save["role_preset"]), ("reviewer", "reviewer"))
+                self.assertEqual(unrelated_save["role_prompt"], legacy_default)
+                self.assertEqual(bus.role_text(unrelated_save), legacy_default)
+
+                same_role_cross = read(admin, "/api/agents", post={
+                    "id": "role_probe",
+                    "role": "reviewer",
+                    "role_preset": "reviewer",
+                    "role_prompt": legacy_default,
+                })
+                self.assertEqual(same_role_cross["role_prompt"], legacy_default)
+                self.assertEqual(bus.role_text(same_role_cross), legacy_default)
+
+                switched_cross = read(admin, "/api/agents", post={
+                    "id": "role_probe",
+                    "role": "worker",
+                    "role_preset": "worker",
+                    "role_prompt": legacy_default,
+                })
+                self.assertEqual((switched_cross["role"], switched_cross["role_preset"]), ("worker", "worker"))
+                self.assertEqual(switched_cross["role_prompt"], legacy_default)
+                self.assertEqual(bus.role_text(switched_cross), legacy_default)
+
                 # Genuine custom role_prompt survives switching via role_preset or role-only patch.
                 read(admin, "/api/agents", post={
                     "id": "role_probe",
