@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { ago } from "@/lib/format";
 import type { MachineInfo } from "@/lib/types";
 import { AgentAvatar, CliIcon } from "@/components/mailroom/bits";
+import { MACHINES_GRID_CLS } from "@/components/mailroom/page-skeletons";
 import { useMailroom } from "@/components/mailroom/context";
 
 function Check({ ok, label, detail }: { ok: boolean | undefined; label: string; detail?: string }) {
@@ -32,7 +33,7 @@ export function MachinesPanel() {
   const machines = snap?.machines ?? [];
   const agents = (snap?.agents ?? []).filter((a) => !a.id.includes(".") && !a.retired);
   return (
-    <div className="grid gap-4 md:grid-cols-2">
+    <div className={MACHINES_GRID_CLS}>
       {machines.map((m) => {
         const ok = machineLinkOk(m);
         const here = agents.filter((a) => (a.machine ?? "A") === m.id && !(a.kind === "temporary" && ["expired", "stopped", "finished", "failed"].includes(a.state ?? "")));

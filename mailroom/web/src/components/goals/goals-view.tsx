@@ -22,7 +22,15 @@ import { api, fileHref } from "@/lib/api";
 import { GOAL_STATE_STYLE, PRIORITY_STYLE, TASK_STAGES, extractTaskDocLinks, isTaskInProgress, isTaskReadyNext, parseTaskStage, plainTaskTitle, resolveTaskFilesFolder, sortTasksByPriority, summarizeTaskProgress, type TaskDocFolder, type TaskProgressSummary } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useMailroom } from "@/components/mailroom/context";
-import { Bone, GoalsSkeleton } from "@/components/mailroom/page-skeletons";
+import {
+  GOALS_FILTER_GRID_CLS,
+  GOALS_HEADER_CLS,
+  GOALS_TAB_ROW_CLS,
+  GOALS_TOP_BAR_CLS,
+  GoalsSkeleton,
+  TaskDiscussionSkeleton,
+  TaskDocumentsSkeleton,
+} from "@/components/mailroom/page-skeletons";
 import { DecisionBadge, GoalsBoard, PriorityFlagControl, StageBadge, StateBadge, shouldHideStateBadge, titleParts, type GoalSummary as Goal, type GoalTask as Task, type TaskPriority } from "@/components/goals/goals-board";
 import { CopyFolderPathAction, OpenFolderAction, RepoFolderDialog } from "@/components/viewer/repo-folder-dialog";
 
@@ -608,7 +616,7 @@ export function GoalsView() {
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
-      <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b bg-card/40 px-3 py-2 sm:px-5">
+      <header className={GOALS_HEADER_CLS}>
         <h1 className="mr-auto text-lg font-semibold tracking-tight">Goals</h1>
         {admin && data && <>
           <Button size="sm" variant="outline" className="h-10 touch:h-11" onClick={() => openEditor("goal")}><Plus /> Goal</Button>
@@ -626,9 +634,9 @@ export function GoalsView() {
               <div className="mx-auto w-full max-w-7xl shrink-0">
                 <div
                   data-goals-top-bar="true"
-                  className="mb-2.5 flex flex-wrap items-center gap-1 rounded-lg border border-border/80 bg-card/60 px-2 py-1.5"
+                  className={GOALS_TOP_BAR_CLS}
                 >
-                <div className="flex flex-wrap items-center gap-0.5 min-[1360px]:gap-1">
+                <div className={GOALS_TAB_ROW_CLS}>
                   <Button size="xs" variant={viewMode === "goals" ? "outline" : "ghost"} className={cn("h-7 gap-1 px-1.5 text-xs touch:h-9", viewMode === "goals" && ACTIVE_FILTER_OUTLINE)} data-view-tab="goals"
                     onClick={() => enterAcrossView("goals")}>
                     <Target className="size-3.5" aria-hidden="true" /> Goals <Badge variant="outline" className="px-1 text-[10px]">{data.goals.length}</Badge>
@@ -679,7 +687,7 @@ export function GoalsView() {
                   label={progressLabel}
                 />
                 </div>
-                <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5" aria-label="Task filters">
+                <div className={GOALS_FILTER_GRID_CLS} aria-label="Task filters">
                   <SearchableSelect
                     label="Filter by goal"
                     value={activeGoal}
@@ -873,7 +881,7 @@ export function GoalsView() {
             </div>
           </div>
         </div>
-      ) : !error && <GoalsSkeleton />}
+      ) : !error && <GoalsSkeleton viewMode={viewMode} />}
       <Dialog
         open={detailOpen && !!data}
         onOpenChange={(open) => {
@@ -977,13 +985,9 @@ export function GoalsView() {
                     </form>
                   </CardContent>
                 </Card>}
-                {!evidence ? (
-                  <div className="space-y-2" aria-busy="true" aria-label="Loading discussion">
-                    <Bone className="h-3 w-full" />
-                    <Bone className="h-3 w-11/12" />
-                    <Bone className="h-3 w-2/3" />
-                  </div>
-                ) : !evidence.events.length && <Card size="sm">
+                {!evidence && !detailError ? (
+                  <TaskDiscussionSkeleton />
+                ) : !evidence ? null : !evidence.events.length && <Card size="sm">
                   <CardContent className={textClass}>{task ? `No messages tagged ${task.id} yet. New message fills in the task ID for you.` : "No recent untagged messages."}</CardContent>
                 </Card>}
                 <ul className="space-y-2">
@@ -1064,13 +1068,9 @@ export function GoalsView() {
                   <p className={textClass}>Choose the task, then select Link beside a document.</p>
                   <SearchableSelect label="Task for untagged documents" value={linkTarget} onChange={setLinkTarget} options={withChoice("Choose a task", taskOptions)} />
                 </>}
-                {!evidence ? (
-                  <div className="space-y-2" aria-busy="true" aria-label="Loading documents">
-                    <Bone className="h-3 w-full" />
-                    <Bone className="h-3 w-4/5" />
-                    <Bone className="h-3 w-1/2" />
-                  </div>
-                ) : !evidence.files.length && <Card size="sm">
+                {!evidence && !detailError ? (
+                  <TaskDocumentsSkeleton />
+                ) : !evidence ? null : !evidence.files.length && <Card size="sm">
                   <CardContent className={textClass}>{task ? `No documents linked to ${task.id} yet. File attachments on tagged messages also appear here.` : "No recent untagged documents."}</CardContent>
                 </Card>}
                 {!!evidence?.files.length && (

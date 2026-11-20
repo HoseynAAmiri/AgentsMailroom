@@ -13,6 +13,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { AgentAvatar, Highlight, Pill, RefChip, RichText, Tip } from "./bits";
 import { Composer } from "./composer";
 import { useMailroom } from "./context";
+import { MAIL_READING_TOOLBAR_CLS } from "./page-skeletons";
 
 function IconAction({ label, icon: Icon, onClick, className }: { label: string; icon: typeof Reply; onClick: () => void; className?: string }) {
   return (
@@ -255,7 +256,7 @@ export function ReadingPane() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-0.5 border-b px-1.5 py-1.5 sm:px-3">
+      <div className={MAIL_READING_TOOLBAR_CLS}>
         <Button variant="ghost" size="icon-sm" aria-label="Back to list" className="md:hidden" onClick={() => select(null)}>
           <ArrowLeft />
         </Button>

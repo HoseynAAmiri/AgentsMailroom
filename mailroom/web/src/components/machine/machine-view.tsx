@@ -6,6 +6,7 @@ import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useMailroom } from "@/components/mailroom/context";
 import { Tip } from "@/components/mailroom/bits";
+import { MACHINE_CONTAINER_CLS } from "@/components/mailroom/page-skeletons";
 import { MachinesPanel } from "./machines-panel";
 
 export function memLevel(avail: number): "ok" | "warn" | "bad" {
@@ -21,7 +22,7 @@ export function MachineView() {
 
   return (
     <ScrollArea className="h-full">
-      <div className="mx-auto max-w-5xl space-y-8 p-3 pb-8 sm:p-6">
+      <div className={MACHINE_CONTAINER_CLS}>
         <MachinesPanel />
         {mem && (
           <section className="rounded-xl border bg-card p-4 sm:p-5">

@@ -19,6 +19,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AgentAvatar, CliIcon, Pill, StateDot, Tip } from "@/components/mailroom/bits";
+import {
+  AGENT_CARDS_GRID_CLS,
+  HEALTH_STRIP_GRID_CLS,
+  ROUTES_GRID_CLS,
+  TEAM_CONTAINER_CLS,
+} from "@/components/mailroom/page-skeletons";
 import { useMailroom } from "@/components/mailroom/context";
 import { AgentDialog } from "./agent-dialog";
 import { SessionDialog } from "./session-dialog";
@@ -337,7 +343,7 @@ function HealthStrip() {
   const mem = snap?.memory && "avail_gib" in snap.memory ? snap.memory : null;
   const tile = "rounded-xl border bg-card px-3 py-2.5 text-left sm:px-4 sm:py-3";
   return (
-    <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-5">
+    <div className={HEALTH_STRIP_GRID_CLS}>
       <div className={tile}>
         <div className="text-xs text-muted-foreground">Listening for messages</div>
         <div className="mt-1 text-2xl font-semibold tabular-nums">
@@ -438,7 +444,7 @@ function LinksEditor() {
       {pairs.length === 0 ? (
         <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">Routes appear when at least two team agents are active.</p>
       ) : (
-        <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        <ul className={ROUTES_GRID_CLS}>
           {pairs.map(({ a, b }) => {
             const link = links.find((l) => matches(l, a.id, b.id));
             const label = `${a.id} and ${b.id}`;
@@ -642,7 +648,7 @@ export function TeamView() {
 
   return (
     <ScrollArea className="h-full">
-      <div className="mx-auto max-w-6xl space-y-8 p-3 pb-8 sm:space-y-10 sm:p-6">
+      <div className={TEAM_CONTAINER_CLS}>
         {!admin && snap && (
           <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
             View only: this port is shared with machine B. Register agents, edit routes and summon from the local command center at{" "}
@@ -664,7 +670,7 @@ export function TeamView() {
             )
           }
         >
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <div className={AGENT_CARDS_GRID_CLS}>
             {team
               .slice()
               .sort((a, b) => order(a) - order(b) || a.id.localeCompare(b.id))

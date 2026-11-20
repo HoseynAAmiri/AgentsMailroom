@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SearchableSelect, type SearchOption } from "@/components/ui/searchable-select";
 import { Tip } from "@/components/mailroom/bits";
-import { FilesSkeleton } from "@/components/mailroom/page-skeletons";
+import { FILES_HEADER_CLS, FILES_TOOLBAR_CLS, FilesSkeleton } from "@/components/mailroom/page-skeletons";
 import { useMailroom } from "@/components/mailroom/context";
 
 type Kind = "image" | "pdf" | "data";
@@ -51,7 +51,8 @@ export function FilesView() {
   const [linkBusy, setLinkBusy] = useState(false);
   const [linkChoices, setLinkChoices] = useState<{ id: string; title: string }[]>([]);
   const [files, setFiles] = useState<Attachment[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [type, setType] = useState<"all" | Kind>("all");
   const [folder, setFolder] = useState("all");
   const [cited, setCited] = useState("all");
@@ -65,11 +66,17 @@ export function FilesView() {
     setLoading(true);
     return api
       .attachments(refresh)
-      .then(setFiles)
-      .catch(() => { toast.error("Could not load attachments"); })
+      .then((rows) => {
+        setFiles(rows);
+        setLoadError("");
+      })
+      .catch((cause) => {
+        setLoadError(cause instanceof Error ? cause.message : String(cause));
+        toast.error("Could not load attachments");
+      })
       .finally(() => setLoading(false));
   }, []);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { queueMicrotask(() => { void load(); }); }, [load]);
   useEffect(() => registerViewRefresh("files", () => load(true)), [load, registerViewRefresh]);
 
   const citedBy = useMemo(() => {
@@ -104,12 +111,12 @@ export function FilesView() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 border-b px-3 py-2.5 sm:px-4">
+      <div className={FILES_HEADER_CLS}>
         <h2 className="text-base font-semibold">Attachments</h2>
         <span className="hidden text-sm text-muted-foreground sm:inline">coordination/attachments · {list.length} files</span>
         {loading && files.length > 0 && <span role="status" className="ml-auto text-xs text-muted-foreground">Refreshing…</span>}
       </div>
-      <div className="flex flex-wrap items-center gap-1.5 border-b px-3 py-2 sm:px-4">
+      <div className={FILES_TOOLBAR_CLS}>
         <div className="flex flex-wrap items-center gap-1">
           <button type="button" className={chip(type === "all")} onClick={() => setType("all")}>
             All
@@ -135,6 +142,7 @@ export function FilesView() {
             value={sort} onChange={setSort} options={FILE_SORTS} />
         </div>
       </div>
+      {loadError && <div role="alert" className="shrink-0 border-b px-3 py-2 text-sm text-destructive sm:px-4">{loadError}</div>}
       <ScrollArea className="min-h-0 flex-1">
         {loading && files.length === 0 ? <FilesSkeleton /> : <>
         <div className="divide-y">
@@ -182,7 +190,7 @@ export function FilesView() {
               </div>
             );
           })}
-          {list.length === 0 && (
+          {!loadError && list.length === 0 && (
             <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-sm text-muted-foreground">
               <FileText className="size-10 opacity-40" />
               No attachments match.

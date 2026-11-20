@@ -15,6 +15,7 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AgentAvatar, Highlight, Pill } from "./bits";
 import { useMailroom } from "./context";
+import { MAIL_THREAD_LIST_HEADER_CLS } from "./page-skeletons";
 
 const PAGE = 60;
 
@@ -251,7 +252,7 @@ export function ThreadList() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 border-b px-3 py-2.5">
+      <div className={MAIL_THREAD_LIST_HEADER_CLS}>
         <Button variant="ghost" size="icon-sm" aria-label="Folders" className="-ml-1 lg:hidden" onClick={() => setNavOpen(true)}>
           <Menu />
         </Button>

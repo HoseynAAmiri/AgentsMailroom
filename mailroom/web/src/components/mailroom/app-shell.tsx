@@ -28,7 +28,18 @@ import { ReadingPane } from "./reading-pane";
 import { StatusFeed } from "./status-feed";
 import { ThreadList } from "./thread-list";
 import { Tip } from "./bits";
-import { PageSkeleton } from "./page-skeletons";
+import {
+  Bone,
+  FolderSidebarSkeleton,
+  GoalsPageFallback,
+  PageSkeleton,
+  ReadingPaneSkeleton,
+  StatusFeedSkeleton,
+  ThreadListSkeleton,
+  resolveMailSkeletonVariant,
+} from "./page-skeletons";
+
+const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 function applyPaneLayout(groupId: string, layout: Record<string, number> | undefined) {
   if (!layout) return;
@@ -54,7 +65,10 @@ const paneStorage = {
   },
 };
 
-const GoalsView = dynamic(() => import("@/components/goals/goals-view").then((module) => module.GoalsView));
+const GoalsView = dynamic(
+  () => import("@/components/goals/goals-view").then((module) => module.GoalsView),
+  { loading: () => <GoalsPageFallback /> },
+);
 const GB_PER_GIB = 2 ** 30 / 1e9;
 
 function Clock() {
@@ -257,8 +271,31 @@ function Rail() {
 
 /** Phones: the list stays mounted under the open conversation and the composer, so Back returns to
  *  the same scroll position. Replies are written full screen, sized to the space above the keyboard. */
-function MobileMailView() {
+function MobileMailView({ loading = false }: { loading?: boolean }) {
   const { folder, selected, compose, savedDraft, startCompose } = useMailroom();
+  if (loading) {
+    const isStatus = folder === "status";
+    return (
+      <div
+        data-skeleton={isStatus ? "mail-status" : "mail"}
+        data-skeleton-variant={resolveMailSkeletonVariant(folder)}
+        role="status"
+        aria-busy="true"
+        aria-label="Loading mail"
+        className="relative h-full"
+      >
+        <div className="h-full">
+          {isStatus ? <StatusFeedSkeleton /> : <ThreadListSkeleton folder={folder} />}
+        </div>
+        {!isStatus && !compose && <Bone className="pointer-events-none absolute right-4 bottom-4 h-12 w-24 rounded-full shadow-lg" />}
+        {!isStatus && compose && (
+          <div className="absolute inset-0 z-20 bg-background">
+            <ReadingPaneSkeleton mode="compose" />
+          </div>
+        )}
+      </div>
+    );
+  }
   const reading = !!selected && folder !== "status";
   return (
     <div className="relative h-full">
@@ -301,8 +338,8 @@ function FolderDrawer() {
 }
 
 /** Tablets: conversation list and reading pane side by side; folders in the drawer. */
-function TabletMailView() {
-  const { folder } = useMailroom();
+function TabletMailView({ loading = false }: { loading?: boolean }) {
+  const { folder, compose } = useMailroom();
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "mailroom-panes-tablet",
     panelIds: ["list", "reading"],
@@ -310,29 +347,39 @@ function TabletMailView() {
   });
   useLayoutEffect(() => {
     applyPaneLayout("mailroom-panes-tablet", defaultLayout as Record<string, number> | undefined);
-  }, [defaultLayout, folder]);
+  }, [defaultLayout, folder, loading]);
+  const isStatus = folder === "status";
+  const skelAttrs = loading
+    ? {
+        "data-skeleton": isStatus ? "mail-status" : "mail",
+        "data-skeleton-variant": resolveMailSkeletonVariant(folder),
+        role: "status" as const,
+        "aria-busy": true as const,
+        "aria-label": "Loading mail",
+      }
+    : {};
   return (
-    <>
-      {folder === "status" ? (
-        <StatusFeed />
+    <div {...skelAttrs} className="h-full">
+      {isStatus ? (
+        loading ? <StatusFeedSkeleton /> : <StatusFeed />
       ) : (
         <ResizablePanelGroup orientation="horizontal" id="mailroom-panes-tablet" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
           <ResizablePanel id="list" defaultSize="42%" minSize="280px">
-            <ThreadList />
+            {loading ? <ThreadListSkeleton folder={folder} /> : <ThreadList />}
           </ResizablePanel>
           <ResizableHandle withHandle />
           <ResizablePanel id="reading" defaultSize="58%" minSize="340px">
-            <ReadingPane />
+            {loading ? <ReadingPaneSkeleton mode={compose ? "compose" : "empty"} /> : <ReadingPane />}
           </ResizablePanel>
         </ResizablePanelGroup>
       )}
-      <FolderDrawer />
-    </>
+      {!loading && <FolderDrawer />}
+    </div>
   );
 }
 
-function DesktopMailView() {
-  const { folder } = useMailroom();
+function DesktopMailView({ loading = false }: { loading?: boolean }) {
+  const { folder, compose } = useMailroom();
   const panelIds = folder === "status" ? ["folders", "status"] : ["folders", "list", "reading"];
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "mailroom-panes",
@@ -341,44 +388,56 @@ function DesktopMailView() {
   });
   useLayoutEffect(() => {
     applyPaneLayout("mailroom-panes", defaultLayout as Record<string, number> | undefined);
-  }, [defaultLayout, folder]);
+  }, [defaultLayout, folder, loading]);
+  const isStatus = folder === "status";
+  const skelAttrs = loading
+    ? {
+        "data-skeleton": isStatus ? "mail-status" : "mail",
+        "data-skeleton-variant": resolveMailSkeletonVariant(folder),
+        role: "status" as const,
+        "aria-busy": true as const,
+        "aria-label": "Loading mail",
+      }
+    : {};
   return (
-    <ResizablePanelGroup orientation="horizontal" id="mailroom-panes" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
-      <ResizablePanel id="folders" defaultSize="17%" minSize="180px" maxSize="28%">
-        <FolderPane />
-      </ResizablePanel>
-      <ResizableHandle />
-      {folder === "status" ? (
-        <ResizablePanel id="status" defaultSize="83%">
-          <StatusFeed />
+    <div {...skelAttrs} className="h-full">
+      <ResizablePanelGroup orientation="horizontal" id="mailroom-panes" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
+        <ResizablePanel id="folders" defaultSize="17%" minSize="180px" maxSize="28%">
+          {loading ? <FolderSidebarSkeleton /> : <FolderPane />}
         </ResizablePanel>
-      ) : (
-        <>
-          <ResizablePanel id="list" defaultSize="30%" minSize="280px">
-            <ThreadList />
+        <ResizableHandle />
+        {isStatus ? (
+          <ResizablePanel id="status" defaultSize="83%">
+            {loading ? <StatusFeedSkeleton /> : <StatusFeed />}
           </ResizablePanel>
-          <ResizableHandle />
-          <ResizablePanel id="reading" defaultSize="53%" minSize="360px">
-            <ReadingPane />
-          </ResizablePanel>
-        </>
-      )}
-    </ResizablePanelGroup>
+        ) : (
+          <>
+            <ResizablePanel id="list" defaultSize="30%" minSize="280px">
+              {loading ? <ThreadListSkeleton folder={folder} /> : <ThreadList />}
+            </ResizablePanel>
+            <ResizableHandle />
+            <ResizablePanel id="reading" defaultSize="53%" minSize="360px">
+              {loading ? <ReadingPaneSkeleton mode={compose ? "compose" : "empty"} /> : <ReadingPane />}
+            </ResizablePanel>
+          </>
+        )}
+      </ResizablePanelGroup>
+    </div>
   );
 }
 
-function MailView() {
+function MailView({ loading = false }: { loading?: boolean }) {
   const mobile = useIsMobile();
   const tablet = useIsTablet();
-  if (mobile) return <MobileMailView />;
-  if (tablet) return <TabletMailView />;
-  return <DesktopMailView />;
+  if (mobile) return <MobileMailView loading={loading} />;
+  if (tablet) return <TabletMailView loading={loading} />;
+  return <DesktopMailView loading={loading} />;
 }
 
 function Shell() {
   const { view, startCompose, snap, error } = useMailroom();
   const [booted, setBooted] = useState(false);
-  useEffect(() => { setBooted(true); }, []);
+  useIsomorphicLayoutEffect(() => { setBooted(true); }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
@@ -394,7 +453,7 @@ function Shell() {
   }, [startCompose]);
   useKeyboardViewport();
 
-  const waiting = !booted || (!snap && !error);
+  const waiting = !snap && !error;
 
   return (
     <div className="mailroom-shell relative flex h-dvh flex-col">
@@ -402,7 +461,11 @@ function Shell() {
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <Rail />
         <main className="min-h-0 min-w-0 flex-1">
-          {waiting ? <PageSkeleton view={view} /> : (
+          {!booted ? (
+            <div className="h-full" role="status" aria-busy="true" aria-label="Loading mailroom" />
+          ) : waiting ? (
+            view === "mail" ? <MailView loading /> : <PageSkeleton view={view} />
+          ) : (
             <>
               {view === "mail" && <MailView />}
               {view === "goals" && <GoalsView />}

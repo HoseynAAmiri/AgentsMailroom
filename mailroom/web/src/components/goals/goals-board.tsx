@@ -26,6 +26,11 @@ import {
   type TaskStage,
 } from "@/lib/format";
 import { HoverTip } from "@/components/ui/tooltip";
+import {
+  GOALS_BOARD_DESKTOP_COLS_6,
+  GOALS_BOARD_DESKTOP_COLS_7,
+  GOALS_BOARD_GRID_CLS,
+} from "@/components/mailroom/page-skeletons";
 import { cn } from "@/lib/utils";
 
 export type TaskState = "todo" | "doing" | "blocked" | "done";
@@ -364,12 +369,8 @@ export function GoalsBoard({
       role="region"
       aria-label="Pipeline stages board"
       className={cn(
-        "grid min-h-0 flex-1 min-w-0 grid-flow-col auto-cols-[14rem] grid-rows-[minmax(0,1fr)] items-stretch gap-2 overflow-x-auto overflow-y-hidden p-0.5",
-        !constrained && (
-          unstaged.length > 0
-            ? "min-[1280px]:grid-flow-row min-[1280px]:grid-cols-7 min-[1280px]:auto-cols-auto min-[1280px]:overflow-x-visible"
-            : "min-[1100px]:grid-flow-row min-[1100px]:grid-cols-6 min-[1100px]:auto-cols-auto min-[1100px]:overflow-x-visible"
-        ),
+        GOALS_BOARD_GRID_CLS,
+        !constrained && (unstaged.length > 0 ? GOALS_BOARD_DESKTOP_COLS_7 : GOALS_BOARD_DESKTOP_COLS_6),
       )}
     >
       {unstaged.length > 0 && (

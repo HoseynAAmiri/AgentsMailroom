@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { BusEvent, Snapshot, UserState } from "@/lib/types";
+
+const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 const POLL_MS = 5000;
 type WireSnapshot = Omit<Snapshot, "tasks"> & { tasks?: Snapshot["tasks"] };
@@ -117,19 +119,12 @@ export function useNow(intervalMs = 1000): number {
 }
 
 export function useLocalStorage<T>(key: string, initial: T): [T, (v: T | ((p: T) => T)) => void] {
-  const [value, setValue] = useState<T>(() => {
-    if (typeof window === "undefined") return initial;
+  // Match the static prerender during hydration; restore saved values before the first paint.
+  const [value, setValue] = useState<T>(initial);
+  useIsomorphicLayoutEffect(() => {
     try {
       const raw = localStorage.getItem(key);
-      return raw == null ? initial : (JSON.parse(raw) as T);
-    } catch {
-      return initial;
-    }
-  });
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(key);
-      if (raw != null) setValue(JSON.parse(raw));
+      if (raw != null) setValue(JSON.parse(raw) as T);
     } catch {
       /* private mode or bad JSON */
     }
