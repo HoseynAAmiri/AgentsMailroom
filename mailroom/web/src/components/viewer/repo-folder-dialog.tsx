@@ -113,16 +113,21 @@ function RepoFolderBody({
   const loading = state.forPath !== currentPath || state.tick !== reloadTick;
   const listing = state.forPath === currentPath ? state.data : null;
   const error = state.forPath === currentPath ? state.error : "";
-  const folderPathToCopy = listing?.abs_path || currentPath;
-  const copiedHere = copiedForPath === folderPathToCopy;
+  const resolvedAbsPath = listing?.abs_path?.trim() || "";
+  const copyDisabled = loading || !resolvedAbsPath;
+  const copiedHere = !!resolvedAbsPath && copiedForPath === resolvedAbsPath;
 
   async function handleCopyCurrentFolder() {
-    const ok = await copyTextToClipboard(folderPathToCopy);
+    if (loading || !resolvedAbsPath) {
+      toast.error("Could not resolve absolute folder path");
+      return;
+    }
+    const ok = await copyTextToClipboard(resolvedAbsPath);
     if (!ok) {
       toast.error("Could not copy folder path");
       return;
     }
-    setCopiedForPath(folderPathToCopy);
+    setCopiedForPath(resolvedAbsPath);
     if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
     copyTimerRef.current = window.setTimeout(() => setCopiedForPath(""), 1800);
     toast.success("Folder path copied");
@@ -152,7 +157,7 @@ function RepoFolderBody({
           <FolderOpen className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <span className="truncate">{title ?? rootPath.split("/").at(-1) ?? rootPath}</span>
         </DialogTitle>
-        <DialogDescription className="truncate font-mono text-xs" title={folderPathToCopy}>
+        <DialogDescription className="truncate font-mono text-xs" title={resolvedAbsPath || currentPath}>
           {currentPath}
         </DialogDescription>
       </DialogHeader>
@@ -202,8 +207,9 @@ function RepoFolderBody({
           type="button"
           size="xs"
           variant="outline"
+          disabled={copyDisabled}
           data-copy-folder-path="dialog"
-          title={`Copy folder path: ${folderPathToCopy}`}
+          title={loading ? "Resolving folder path…" : resolvedAbsPath ? `Copy folder path: ${resolvedAbsPath}` : "Absolute folder path unavailable"}
           className="h-6 gap-1 px-2 text-xs"
           onClick={() => void handleCopyCurrentFolder()}
         >
@@ -413,14 +419,21 @@ export function CopyFolderPathAction({
     if (copying) return;
     setCopying(true);
     try {
-      let targetPath = cacheRef.current.get(folder.folder);
+      let targetPath = cacheRef.current.get(folder.folder) ?? "";
       if (!targetPath) {
         try {
           const listing = await api.repoDir(folder.folder);
-          targetPath = listing.abs_path || folder.folder;
-          if (listing.abs_path) cacheRef.current.set(folder.folder, listing.abs_path);
-        } catch {
-          targetPath = folder.folder;
+          const resolved = listing.abs_path?.trim() || "";
+          if (!resolved) {
+            toast.error("Could not resolve absolute folder path");
+            return;
+          }
+          cacheRef.current.set(folder.folder, resolved);
+          targetPath = resolved;
+        } catch (cause) {
+          const detail = cause instanceof Error ? cause.message : String(cause);
+          toast.error(detail ? `Could not resolve absolute folder path: ${detail}` : "Could not resolve absolute folder path");
+          return;
         }
       }
       const ok = await copyTextToClipboard(targetPath);
