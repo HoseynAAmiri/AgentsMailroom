@@ -6,6 +6,7 @@
 !/.gitignore
 !/.size-allowlist
 !/README.md
+!/LICENSE
 !/.githooks/
 !/tools/
 
