@@ -50,7 +50,23 @@ export const api = {
     post<Agent>(`/api/sessions/${encodeURIComponent(id)}/reference`, { session_id, previous_id }),
   instructions: (id: string) => call<{ agent: string; text: string }>(`/api/agents/${encodeURIComponent(id)}/instructions`),
   attachments: (refresh = false) => call<Attachment[]>(refresh ? "/api/attachments?refresh=1" : "/api/attachments"),
+  repoDir: (path = "") => call<RepoDirListing>(`/api/repo-dir?path=${encodeURIComponent(path)}`),
 };
+
+export interface RepoDirEntry {
+  name: string;
+  path: string;
+  kind: "dir" | "file";
+  size: number;
+  modified: string;
+  viewable: boolean;
+}
+
+export interface RepoDirListing {
+  path: string;
+  parent: string | null;
+  entries: RepoDirEntry[];
+}
 
 export interface SummonRequest {
   cli: string;

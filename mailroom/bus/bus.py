@@ -1006,6 +1006,62 @@ def attachments_list(limit: int = 300, offset: int = 0, force: bool = False) -> 
     return _ATTACHMENT_INDEX.list(limit=limit, offset=offset, force=force)
 
 
+def list_repo_dir(rel: str) -> dict[str, Any]:
+    """List immediate non-hidden directory entries strictly inside REPO_DIR (excluding STORE_DIR)."""
+    clean = (rel or "").strip().replace("\\", "/")
+    parts = [p for p in clean.split("/") if p and p != "."]
+    if ".." in parts or any(p.startswith(".") for p in parts):
+        raise FileNotFoundError("no such directory")
+    base = REPO_DIR.resolve()
+    store_base = STORE_DIR.resolve()
+    try:
+        target = base.joinpath(*parts).resolve() if parts else base
+    except (ValueError, OSError) as exc:
+        raise FileNotFoundError("no such directory") from exc
+    if target != base and not viewable_path(target, base):
+        raise FileNotFoundError("no such directory")
+    if target == store_base or target.is_relative_to(store_base):
+        raise FileNotFoundError("no such directory")
+    if not target.is_dir():
+        raise FileNotFoundError("no such directory")
+
+    entries: list[dict[str, Any]] = []
+    for child in target.iterdir():
+        name = child.name
+        if name.startswith(".") or name in {"__pycache__", "node_modules"}:
+            continue
+        try:
+            resolved_child = child.resolve()
+            if resolved_child == store_base or resolved_child.is_relative_to(store_base):
+                continue
+            if not viewable_path(resolved_child, base):
+                continue
+            st = resolved_child.stat()
+            is_dir = resolved_child.is_dir()
+            is_file = resolved_child.is_file()
+        except OSError:
+            continue
+        if not (is_dir or is_file):
+            continue
+        rel_child = child.relative_to(base).as_posix()
+        ext = resolved_child.suffix.lower()
+        viewable = bool(is_file and (ext in TEXT_EXT or ext in MIME) and st.st_size <= VIEW_MAX_BYTES)
+        entries.append({
+            "name": name,
+            "path": rel_child,
+            "kind": "dir" if is_dir else "file",
+            "size": 0 if is_dir else st.st_size,
+            "modified": iso_mtime(st.st_mtime),
+            "viewable": viewable,
+        })
+    entries.sort(key=lambda row: (0 if row["kind"] == "dir" else 1, row["name"].lower(), row["name"]))
+    rel_dir = target.relative_to(base).as_posix() if target != base else ""
+    parent_dir = target.parent.relative_to(base).as_posix() if target != base else None
+    if parent_dir == ".":
+        parent_dir = ""
+    return {"path": rel_dir, "parent": parent_dir, "entries": entries}
+
+
 # ---------------------------------------------------------------- tasks
 
 def derive_tasks(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2033,6 +2089,15 @@ class BusHandler(SimpleHTTPRequestHandler):
             if qs.get("refresh", ["0"])[0] == "1" and self.admin:
                 _ATTACHMENT_INDEX.invalidate()
             self._send_json(200, attachments_list(limit=limit, offset=offset))
+            return
+        if parsed.path == "/api/repo-dir":
+            if not self.admin:
+                self._send_json(403, {"error": "admin required"})
+                return
+            try:
+                self._send_json(200, list_repo_dir(qs.get("path", [""])[0]))
+            except FileNotFoundError as exc:
+                self._send_json(404, {"error": str(exc)})
             return
         if parsed.path.startswith("/api/wait/"):
             agent_id = parsed.path.split("/")[3]

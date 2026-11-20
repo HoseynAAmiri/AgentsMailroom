@@ -1,11 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { ArrowDown, ArrowLeft, ArrowUp, ArrowUpToLine, ChevronRight, CircleCheck, Columns3, FileText, Link2, List, ListFilter, MessageSquare, MoreHorizontal, Plus, Tag, Target, TriangleAlert, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, ArrowUpToLine, ChevronRight, CircleCheck, Columns3, FileText, Link2, ListChecks, ListFilter, MessageSquare, MoreHorizontal, Plus, Tag, Target, TriangleAlert, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -18,10 +18,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SearchableSelect, type SearchOption } from "@/components/ui/searchable-select";
 import { useBackLayer } from "@/hooks/use-back-layer";
 import { api, fileHref } from "@/lib/api";
-import { GOAL_STATE_STYLE, TASK_STAGES, parseTaskStage, plainTaskTitle } from "@/lib/format";
+import { GOAL_STATE_STYLE, TASK_STAGES, extractTaskDocLinks, isTaskReadyNext, parseTaskStage, plainTaskTitle, sortTasksByPriority, type TaskDocFolder } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useMailroom } from "@/components/mailroom/context";
-import { DecisionBadge, GoalsBoard, StageBadge, StateBadge, titleParts, type GoalSummary as Goal, type GoalTask as Task } from "@/components/goals/goals-board";
+import { DecisionBadge, GoalsBoard, PriorityBadge, StageBadge, StateBadge, TaskDocFooter, titleParts, type GoalSummary as Goal, type GoalTask as Task } from "@/components/goals/goals-board";
+import { OpenFolderAction, RepoFolderDialog } from "@/components/viewer/repo-folder-dialog";
 
 interface Tracker { goals: Goal[]; tasks: Task[]; order_revision: number; revision: number }
 interface Evidence {
@@ -32,12 +33,102 @@ interface Evidence {
   file_total: number;
 }
 type Edit = { kind: "goal" | "task"; id?: string; revision?: number; fields: Record<string, string | boolean> };
-type GoalsViewMode = "board" | "list" | "goals";
+type GoalsViewMode = "goals" | "decisions" | "ready" | "board";
 const textClass = "text-sm text-muted-foreground";
 const pageSize = 30;
 const stateOptions = Object.entries(GOAL_STATE_STYLE).map(([value, { label }]) => ({ value, label }));
 const stageOptions = TASK_STAGES.map((value) => ({ value, label: value }));
 const priorities = ["high", "normal", "low"].map((value) => ({ value, label: value[0].toUpperCase() + value.slice(1) }));
+const PRIORITY_FILTERS = [
+  { value: "", label: "All" },
+  { value: "high", label: "High" },
+  { value: "normal", label: "Normal" },
+  { value: "low", label: "Low" },
+] as const;
+
+interface TaskRowCardProps {
+  task: Task;
+  selected: boolean;
+  showGoalBadge?: boolean;
+  admin: boolean;
+  onSelect: (id: string) => void;
+  onOpenFile: (file: { href: string; path: string }) => void;
+  onOpenFolder: (folder: TaskDocFolder) => void;
+}
+
+function TaskRowCard({
+  task,
+  selected,
+  showGoalBadge = false,
+  admin,
+  onSelect,
+  onOpenFile,
+  onOpenFolder,
+}: TaskRowCardProps) {
+  const parsed = parseTaskStage(task.next_action);
+  const summaryText =
+    task.state === "blocked" && task.blocker.trim()
+      ? `Blocker: ${task.blocker.trim()}`
+      : parsed.text;
+  const isBlockerSummary = task.state === "blocked" && !!task.blocker.trim();
+
+  return (
+    <Card
+      size="sm"
+      data-goal-row={task.id}
+      className={cn(
+        "gap-0 py-0 shadow-none transition-colors",
+        task.state === "done" && !selected && "bg-muted/35 ring-foreground/5",
+        task.state === "blocked" && "border-l-2 border-l-amber-500",
+        selected && "bg-primary/8 ring-primary/50",
+      )}
+    >
+      <button
+        type="button"
+        onClick={() => onSelect(task.id)}
+        aria-current={selected ? "true" : undefined}
+        className="flex h-auto min-h-14 w-full min-w-0 items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring touch:py-3"
+      >
+        <span className="min-w-0 flex-1 space-y-1">
+          <span className="flex flex-wrap items-center gap-1.5">
+            <Badge variant="ghost" className="px-0 font-mono text-muted-foreground">{task.id}</Badge>
+            {showGoalBadge && <Badge variant="outline" className="font-mono text-[11px]">{task.goal_id}</Badge>}
+            <StateBadge task={task} />
+            <DecisionBadge decision={task.decision} />
+            <StageBadge stage={parsed.stage} parsed={parsed} />
+            <PriorityBadge priority={task.priority} />
+            <Badge variant="outline" className="text-[11px]">{task.owner === "user" ? "USER" : task.owner || "Unassigned"}</Badge>
+          </span>
+          <span
+            className={cn(
+              "line-clamp-2 block text-sm leading-snug [overflow-wrap:anywhere]",
+              task.state === "done" && !selected ? "font-normal text-muted-foreground" : "font-medium",
+            )}
+          >
+            {titleParts(task.title).heading}
+          </span>
+          {summaryText && (
+            <span
+              className={cn(
+                "line-clamp-2 block text-xs leading-snug [overflow-wrap:anywhere]",
+                isBlockerSummary ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground",
+              )}
+            >
+              {summaryText}
+            </span>
+          )}
+        </span>
+        <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+      </button>
+      <TaskDocFooter
+        task={task}
+        admin={admin}
+        onOpenFile={onOpenFile}
+        onOpenFolder={onOpenFolder}
+      />
+    </Card>
+  );
+}
 
 async function request<T>(url: string, body?: unknown): Promise<T> {
   const response = await fetch(url, {
@@ -59,10 +150,10 @@ export function GoalsView() {
   const [stageFilter, setStageFilter] = useState("");
   const [ownerFilter, setOwnerFilter] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
-  const [decisionsOnly, setDecisionsOnly] = useState(false);
-  const [viewMode, setViewMode] = useState<GoalsViewMode>("board");
+  const [viewMode, setViewMode] = useState<GoalsViewMode>("goals");
   const [showFilters, setShowFilters] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<{ filter: string; ids: string[] }>();
+  const [browseFolder, setBrowseFolder] = useState<TaskDocFolder | null>(null);
   const [evidence, setEvidence] = useState<Evidence>();
   const [detailError, setDetailError] = useState("");
   const [detailRefresh, setDetailRefresh] = useState(0);
@@ -120,20 +211,42 @@ export function GoalsView() {
   useBackLayer(!!selected, () => setSelected(""));
   useBackLayer(!!edit, () => setEdit(undefined));
   useBackLayer(!!remove, () => setRemove(undefined));
+  useBackLayer(!!browseFolder, () => setBrowseFolder(null));
 
   const goal = data?.goals.find((row) => row.id === goalFilter);
   const task = data?.tasks.find((row) => row.id === selected);
-  const rows = useMemo(() => data?.tasks.filter((row) => {
+  const baseWithoutPriority = useMemo(() => data?.tasks.filter((row) => {
     const query = search.trim().toLowerCase();
     const { stage } = parseTaskStage(row.next_action);
     return (!goalFilter || row.goal_id === goalFilter)
-      && (!decisionsOnly || !!row.decision)
       && (!stateFilter || row.state === stateFilter)
       && (!stageFilter || (stageFilter === "-" ? !stage : stage === stageFilter))
       && (!ownerFilter || row.owner === (ownerFilter === "-" ? "" : ownerFilter))
-      && (!priorityFilter || row.priority === priorityFilter)
-      && (!query || [row.id, row.title, row.notes, row.next_action].some((value) => value.toLowerCase().includes(query)));
-  }) ?? [], [data, goalFilter, stateFilter, stageFilter, ownerFilter, priorityFilter, search, decisionsOnly]);
+      && (!query || [row.id, row.title, row.notes, row.next_action, row.blocker].some((value) => value.toLowerCase().includes(query)));
+  }) ?? [], [data, goalFilter, stateFilter, stageFilter, ownerFilter, search]);
+
+  const rows = useMemo(
+    () => sortTasksByPriority(baseWithoutPriority.filter((row) => !priorityFilter || row.priority === priorityFilter)),
+    [baseWithoutPriority, priorityFilter],
+  );
+  const decisionRows = useMemo(() => rows.filter((row) => !!row.decision), [rows]);
+  const readyRows = useMemo(() => rows.filter((row) => isTaskReadyNext(row)), [rows]);
+  const totalDecisions = useMemo(() => data?.tasks.filter((row) => !!row.decision).length ?? 0, [data?.tasks]);
+  const totalReady = useMemo(() => data?.tasks.filter((row) => isTaskReadyNext(row)).length ?? 0, [data?.tasks]);
+  const priorityBase = useMemo(() => {
+    if (viewMode === "decisions") return baseWithoutPriority.filter((row) => !!row.decision);
+    if (viewMode === "ready") return baseWithoutPriority.filter((row) => isTaskReadyNext(row));
+    return baseWithoutPriority;
+  }, [baseWithoutPriority, viewMode]);
+  const priorityCounts = useMemo(() => {
+    const counts = { "": priorityBase.length, high: 0, normal: 0, low: 0 };
+    for (const row of priorityBase) {
+      if (row.priority === "high") counts.high++;
+      else if (row.priority === "low") counts.low++;
+      else counts.normal++;
+    }
+    return counts;
+  }, [priorityBase]);
   const people = useMemo(() => [...new Set(["user", ...agents.keys(), ...(data?.tasks.map((row) => row.owner).filter(Boolean) ?? [])])],
     [agents, data?.tasks]);
   const goalOptions = useMemo(() => data?.goals.map((row) => ({ value: row.id, label: `${row.id} · ${plainTaskTitle(row.title)}` })) ?? [], [data?.goals]);
@@ -209,16 +322,48 @@ export function GoalsView() {
   const currentRevision = edit?.id && (edit.kind === "goal"
     ? data?.goals.find((row) => row.id === edit.id)?.revision
     : data?.tasks.find((row) => row.id === edit.id)?.revision);
-  const orderAvailable = !stateFilter && !stageFilter && !ownerFilter && !priorityFilter && !search.trim() && !decisionsOnly;
+  const orderAvailable = !goalFilter && !stateFilter && !stageFilter && !ownerFilter && !priorityFilter && !search.trim() && viewMode === "goals";
   const groups = data?.goals.filter((row) => !goalFilter || goalFilter === row.id) ?? [];
   const detailOpen = !!selected;
-  const groupFilter = JSON.stringify([goalFilter, stateFilter, stageFilter, ownerFilter, priorityFilter, search.trim(), decisionsOnly]);
-  const visibleGroupIds = [...new Set(rows.map((row) => row.goal_id))];
-  const openGroups = expandedGroups?.filter === groupFilter
-    ? expandedGroups.ids : goalFilter ? [goalFilter] : orderAvailable ? visibleGroupIds.slice(0, 1) : visibleGroupIds;
+  const anyFilter = !!(goalFilter || stateFilter || stageFilter || ownerFilter || priorityFilter || search.trim());
+  const groupFilter = JSON.stringify([goalFilter, stateFilter, stageFilter, ownerFilter, priorityFilter, search.trim()]);
+  const visibleGroupIds = groups
+    .filter((group) => rows.some((row) => row.goal_id === group.id) || goalFilter === group.id)
+    .map((group) => group.id);
+  const defaultOpenGroups = goalFilter ? [goalFilter] : anyFilter ? visibleGroupIds : visibleGroupIds.slice(0, 1);
+  const openGroups = expandedGroups?.filter === groupFilter ? expandedGroups.ids : defaultOpenGroups;
+  const allExpanded = visibleGroupIds.length > 0 && visibleGroupIds.every((id) => openGroups.includes(id));
   const detail = task ? titleParts(task.title) : { heading: selected === "untagged" ? "Untagged" : "Task unavailable", rest: "" };
   const parsedDetail = task ? parseTaskStage(task.next_action) : null;
+  const detailDocLinks = task ? extractTaskDocLinks([...(task.links ?? []), ...(evidence?.files ?? [])], task.id) : null;
   const withChoice = (label: string, options: SearchOption[]): SearchOption[] => [{ value: "", label }, ...options];
+
+  function renderDocFileItem(file: string, canUnlink: boolean) {
+    const href = fileHref(file);
+    if (!href) return null;
+    const filename = file.split("/").at(-1) || file;
+    return (
+      <li key={file}>
+        <Card size="sm" className="flex-row items-center justify-between gap-2 p-2">
+          <Button variant="ghost" className="h-auto min-h-11 min-w-0 flex-1 justify-start gap-2 whitespace-normal" onClick={() => openFile({ href, path: file })}>
+            <FileText className="size-4 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 text-left">
+              <span className="block text-sm [overflow-wrap:anywhere]">{filename}</span>
+              <span className="line-clamp-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">{file}</span>
+            </span>
+          </Button>
+          {task && canUnlink && (
+            <Button size="sm" variant="ghost" className="h-10 touch:h-11"
+              onClick={() => void act({ action: "unlink", id: task.id, path: file }, "Manual link removed")}>Unlink</Button>
+          )}
+          {!task && (
+            <Button size="sm" variant="outline" className="h-10 touch:h-11" disabled={!linkTarget || busy}
+              onClick={() => void act({ action: "link", id: linkTarget, path: file }, "File linked")}>Link</Button>
+          )}
+        </Card>
+      </li>
+    );
+  }
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
@@ -234,146 +379,247 @@ export function GoalsView() {
         <div className={cn("grid min-h-0 flex-1", detailOpen && "min-[900px]:grid-cols-[minmax(20rem,2fr)_minmax(0,3fr)]")}>
           <div ref={listRef} className={cn("min-h-0 min-w-0 overflow-y-auto", detailOpen && "hidden min-[900px]:block min-[900px]:border-r")}>
             <div className={cn("min-w-0 px-3 py-4 sm:px-5", viewMode === "board" && !detailOpen ? "w-full" : "mx-auto max-w-6xl")}>
-              <div className="mb-4 flex flex-wrap items-center gap-2">
-                <Button size="sm" variant={viewMode === "board" && !decisionsOnly ? "secondary" : "ghost"} className="h-10 touch:h-11"
-                  onClick={() => { setDecisionsOnly(false); setViewMode("board"); }}>
-                  <Columns3 /> Board <Badge variant="outline">{rows.length}</Badge>
-                </Button>
-                <Button size="sm" variant={viewMode === "list" && !decisionsOnly ? "secondary" : "ghost"} className="h-10 touch:h-11"
-                  onClick={() => { setDecisionsOnly(false); setViewMode("list"); }}>
-                  <List /> List <Badge variant="outline">{rows.length}</Badge>
-                </Button>
-                <Button size="sm" variant={viewMode === "goals" ? "secondary" : "ghost"} className="h-10 touch:h-11"
-                  onClick={() => {
-                    setGoalFilter(""); setStateFilter(""); setStageFilter(""); setOwnerFilter(""); setPriorityFilter("");
-                    setDecisionsOnly(false); setViewMode("goals");
-                  }}>
-                  <Target /> Goals <Badge variant="outline">{data.goals.length}</Badge>
-                </Button>
-                <Button size="sm" variant={decisionsOnly ? "secondary" : "ghost"} className="h-10 touch:h-11" aria-pressed={decisionsOnly}
-                  onClick={() => {
-                    setGoalFilter(""); setStateFilter(""); setStageFilter(""); setOwnerFilter(""); setPriorityFilter("");
-                    setDecisionsOnly((value) => {
-                      const next = !value;
-                      if (next && viewMode === "goals") setViewMode("board");
-                      return next;
-                    });
-                  }}>
-                  <TriangleAlert /> USER decisions <Badge variant="outline">{data.tasks.filter((row) => row.decision).length}</Badge>
-                </Button>
-                <Button size="icon" variant={showFilters ? "secondary" : "ghost"} className="size-10 touch:size-11" aria-label="Filters" aria-expanded={showFilters}
-                  title="Filters" onClick={() => {
-                    setShowFilters((value) => !value);
-                    if (viewMode === "goals") setViewMode("board");
-                  }}><ListFilter /></Button>
-                {admin && <Button size="sm" variant="ghost" className="h-10 touch:h-11" onClick={() => choose("untagged")}><Tag /> Untagged</Button>}
+              <div className="mb-3 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button size="sm" variant={viewMode === "goals" ? "secondary" : "ghost"} className="h-10 touch:h-11" data-view-tab="goals"
+                    onClick={() => { setGoalFilter(""); setViewMode("goals"); }}>
+                    <Target /> Goals <Badge variant="outline">{data.goals.length}</Badge>
+                  </Button>
+                  <Button size="sm" variant={viewMode === "decisions" ? "secondary" : "ghost"} className="h-10 touch:h-11" data-view-tab="decisions"
+                    onClick={() => setViewMode("decisions")}>
+                    <TriangleAlert /> Needs your decision <Badge variant="outline">{totalDecisions}</Badge>
+                  </Button>
+                  <Button size="sm" variant={viewMode === "ready" ? "secondary" : "ghost"} className="h-10 touch:h-11" data-view-tab="ready"
+                    onClick={() => setViewMode("ready")}>
+                    <ListChecks /> Ready next <Badge variant="outline">{totalReady}</Badge>
+                  </Button>
+                  <Button size="sm" variant={viewMode === "board" ? "secondary" : "ghost"} className="h-10 touch:h-11" data-view-tab="board"
+                    onClick={() => setViewMode("board")}>
+                    <Columns3 /> Stage board <Badge variant="outline">{rows.length}</Badge>
+                  </Button>
+                  <Button size="icon" variant={showFilters ? "secondary" : "ghost"} className="size-10 touch:size-11" aria-label="Filters" aria-expanded={showFilters}
+                    title="Filters" onClick={() => setShowFilters((value) => !value)}><ListFilter /></Button>
+                  {admin && <Button size="sm" variant="ghost" className="h-10 touch:h-11" onClick={() => choose("untagged")}><Tag /> Untagged</Button>}
+                </div>
+                <div role="group" aria-label="Filter by priority" className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs font-medium text-muted-foreground">Priority:</span>
+                  {PRIORITY_FILTERS.map((opt) => {
+                    const active = priorityFilter === opt.value;
+                    const count = priorityCounts[opt.value];
+                    return (
+                      <Button
+                        key={opt.value || "all"}
+                        type="button"
+                        size="xs"
+                        variant={active ? "secondary" : "outline"}
+                        aria-pressed={active}
+                        data-priority-filter={opt.value || "all"}
+                        className="h-7 gap-1 px-2 text-xs tabular-nums"
+                        onClick={() => setPriorityFilter(opt.value)}
+                      >
+                        {opt.label}
+                        <span className="text-muted-foreground">({count})</span>
+                      </Button>
+                    );
+                  })}
+                </div>
               </div>
-              {viewMode === "goals" && <Card size="sm" className="mb-4">
-                <CardHeader><CardTitle>How to use Goals</CardTitle></CardHeader>
-                <CardContent className={textClass}>
-                  Use <strong>Board</strong> to follow every task across the 7 pipeline stages, or open a goal below to filter the board.{" "}
-                  {admin && <>Select any card for <strong>Overview</strong>, <strong>Discussion</strong>, and <strong>Documents</strong>,
-                    or open linked context/dossier/PDF files directly from the card.</>}
-                </CardContent>
-              </Card>}
-              {showFilters && viewMode !== "goals" && <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 min-[900px]:grid-cols-2" aria-label="Task filters">
+              {showFilters && <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 min-[900px]:grid-cols-2" aria-label="Task filters">
                 <SearchableSelect label="Filter by goal" value={goalFilter} onChange={setGoalFilter} options={withChoice("All goals", goalOptions)} />
                 <SearchableSelect label="Filter by state" value={stateFilter} onChange={setStateFilter} options={withChoice("Any state", stateOptions)} />
                 <SearchableSelect label="Filter by stage" value={stageFilter} onChange={setStageFilter}
                   options={withChoice("Any stage", [...stageOptions, { value: "-", label: "No stage / malformed" }])} />
                 <SearchableSelect label="Filter by owner" value={ownerFilter} onChange={setOwnerFilter}
                   options={withChoice("Any owner", [{ value: "-", label: "Unassigned" }, ...personOptions])} />
-                <SearchableSelect label="Filter by priority" value={priorityFilter} onChange={setPriorityFilter} options={withChoice("Any priority", priorities)} />
               </div>}
               {viewMode === "board" ? (
                 <>
+                  <div className="mb-3 space-y-2">
+                    <div role="group" aria-label="Filter stage board by goal" className="flex flex-wrap items-center gap-1.5">
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant={!goalFilter ? "secondary" : "outline"}
+                        className="h-7 px-2 text-xs"
+                        onClick={() => setGoalFilter("")}
+                      >
+                        All goals ({data.tasks.length})
+                      </Button>
+                      {data.goals.map((g) => (
+                        <Button
+                          key={g.id}
+                          type="button"
+                          size="xs"
+                          variant={goalFilter === g.id ? "secondary" : "outline"}
+                          data-board-goal={g.id}
+                          className="h-7 px-2 font-mono text-xs"
+                          onClick={() => setGoalFilter(goalFilter === g.id ? "" : g.id)}
+                        >
+                          {g.id}
+                        </Button>
+                      ))}
+                    </div>
+                    {goal && (
+                      <p className="text-xs text-muted-foreground">
+                        Showing <span className="font-mono font-medium text-foreground">{goal.id}</span> · {plainTaskTitle(goal.title)}
+                      </p>
+                    )}
+                  </div>
                   {!rows.length && <Card size="sm" className="mb-3"><CardContent className={textClass}>No tasks match.</CardContent></Card>}
-                  <GoalsBoard tasks={rows} selectedId={selected} onSelect={choose} onOpenFile={openFile} />
+                  <GoalsBoard tasks={rows} selectedId={selected} admin={admin} onSelect={choose} onOpenFile={openFile} onOpenFolder={setBrowseFolder} />
                 </>
-              ) : viewMode === "goals" ? <div className={cn("grid grid-cols-1 gap-3 sm:grid-cols-2", detailOpen ? "min-[900px]:grid-cols-1" : "xl:grid-cols-3")}>
-                {data.goals.map((group) => {
-                  const items = data.tasks.filter((row) => row.goal_id === group.id);
-                  const done = items.filter((row) => row.state === "done").length;
-                  const blocked = items.filter((row) => row.state === "blocked").length;
-                  return <Card className="relative border border-transparent shadow-sm hover:border-primary/40" key={group.id}>
-                    <Button variant="ghost" aria-label={`Open ${group.id} ${group.title}`} className="absolute inset-0 z-10 size-full bg-transparent hover:bg-primary/5"
-                      onClick={() => { setGoalFilter(group.id); setViewMode("board"); }} />
-                    <CardHeader className="gap-2">
-                      <div className="flex items-center justify-between">
-                        <Badge variant="outline" className="font-mono text-muted-foreground">{group.id}</Badge>
-                        <ChevronRight className="size-4 text-muted-foreground" aria-hidden="true" />
-                      </div>
-                      <CardTitle className="text-balance">{plainTaskTitle(group.title)}</CardTitle>
-                    </CardHeader>
-                    <CardContent className="mt-auto space-y-2">
-                      <Progress value={items.length ? 100 * done / items.length : 0} aria-label={`${done} of ${items.length} tasks done`} />
-                      <CardDescription className="flex items-center justify-between gap-2 tabular-nums">
-                        <span>{done} of {items.length} done</span>
-                        {!!blocked && <Badge variant="secondary" className={GOAL_STATE_STYLE.blocked.cls}>{blocked} blocked</Badge>}
-                      </CardDescription>
-                    </CardContent>
-                  </Card>;
-                })}
-              </div> : <Accordion multiple value={openGroups} onValueChange={(ids) => setExpandedGroups({ filter: groupFilter, ids })}
-                aria-label="Tasks by goal" className="space-y-2.5">
-                {groups.map((group) => {
-                  const items = rows.filter((row) => row.goal_id === group.id);
-                  if (!items.length && !goal) return null;
-                  return <AccordionItem key={group.id} value={group.id} className="rounded-xl bg-card ring-1 ring-foreground/10">
-                    <div className="flex items-center gap-1">
-                      <AccordionTrigger>
-                        <Badge variant="outline" className="font-mono">{group.id}</Badge>
-                        <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{plainTaskTitle(group.title)}</span>
-                        <Badge variant="secondary" aria-label={`${items.length} tasks`}>{items.length}</Badge>
-                      </AccordionTrigger>
-                      {admin && openGroups.includes(group.id) && (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger render={<Button size="icon" variant="ghost" className="mr-1 size-10 touch:size-11" aria-label={`Actions for ${group.id}`}><MoreHorizontal /></Button>} />
-                          <DropdownMenuContent align="end" className="w-40">
-                            <DropdownMenuItem className="touch:min-h-11" onClick={() => openEditor("goal", group)}>Rename goal</DropdownMenuItem>
-                            <DropdownMenuItem className="touch:min-h-11" variant="destructive"
-                              onClick={() => setRemove({ goal: group, count: data.tasks.filter((row) => row.goal_id === group.id).length })}>Remove goal</DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+              ) : viewMode === "decisions" ? (
+                <div className="space-y-3" data-view-panel="decisions">
+                  <p className={textClass}>Tasks waiting on a USER decision across all goals, sorted by priority.</p>
+                  {decisionRows.length > 0 ? (
+                    <ul className="space-y-2">
+                      {decisionRows.map((row) => (
+                        <li key={row.id}>
+                          <TaskRowCard task={row} selected={selected === row.id} showGoalBadge admin={admin} onSelect={choose} onOpenFile={openFile} onOpenFolder={setBrowseFolder} />
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <Card size="sm"><CardContent className={textClass}>No tasks waiting on a USER decision match the current filters.</CardContent></Card>
+                  )}
+                </div>
+              ) : viewMode === "ready" ? (
+                <div className="space-y-3" data-view-panel="ready">
+                  <p className={textClass}>Actionable tasks across all goals (excludes blocked, done, and tasks waiting on a USER decision), sorted by priority.</p>
+                  {readyRows.length > 0 ? (
+                    <ul className="space-y-2">
+                      {readyRows.map((row) => (
+                        <li key={row.id}>
+                          <TaskRowCard task={row} selected={selected === row.id} showGoalBadge admin={admin} onSelect={choose} onOpenFile={openFile} onOpenFolder={setBrowseFolder} />
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <Card size="sm"><CardContent className={textClass}>No ready tasks match the current filters.</CardContent></Card>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-3" data-view-panel="goals">
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-muted/25 px-3 py-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant={totalDecisions > 0 ? "outline" : "ghost"}
+                        className={cn("h-7 gap-1 px-2 text-xs", totalDecisions > 0 && "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300")}
+                        onClick={() => setViewMode("decisions")}
+                      >
+                        <TriangleAlert className="size-3.5" aria-hidden="true" />
+                        Needs your decision ({totalDecisions})
+                      </Button>
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="outline"
+                        className="h-7 gap-1 px-2 text-xs"
+                        onClick={() => setViewMode("ready")}
+                      >
+                        <ListChecks className="size-3.5" aria-hidden="true" />
+                        Ready next ({totalReady})
+                      </Button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="hidden text-xs text-muted-foreground sm:inline">Sorted High &gt; Normal &gt; Low</span>
+                      {visibleGroupIds.length > 0 && (
+                        <Button
+                          type="button"
+                          size="xs"
+                          variant="ghost"
+                          className="h-7 px-2 text-xs"
+                          onClick={() => setExpandedGroups({ filter: groupFilter, ids: allExpanded ? [] : visibleGroupIds })}
+                        >
+                          {allExpanded ? "Collapse all" : "Expand all"}
+                        </Button>
                       )}
                     </div>
-                    <AccordionContent>
-                    <ul className="space-y-2">
-                      {items.map((row) => {
-                        const parsed = parseTaskStage(row.next_action);
-                        return <li key={row.id}>
-                        <Card size="sm" className={cn(
-                          "gap-0 py-0 shadow-none",
-                          row.state === "done" && "bg-muted/35 ring-foreground/5",
-                          selected === row.id && "bg-primary/8 ring-primary/50",
-                        )}>
-                          <Button type="button" variant="ghost" onClick={() => choose(row.id)} aria-current={selected === row.id ? "true" : undefined}
-                            className="h-auto min-h-16 w-full min-w-0 justify-between gap-3 rounded-xl px-3 py-2.5 text-left whitespace-normal touch:py-3">
-                            <span className="min-w-0 flex-1 space-y-1.5">
-                              <span className="flex flex-wrap items-center gap-1.5">
-                                <Badge variant="ghost" className="px-0 font-mono text-muted-foreground">{row.id}</Badge>
-                                <StateBadge task={row} />
-                                <DecisionBadge decision={row.decision} />
-                                <StageBadge stage={parsed.stage} parsed={parsed} />
-                                {row.priority !== "normal" && <Badge variant="outline">{row.priority === "high" ? "High priority" : "Low priority"}</Badge>}
-                                {row.owner && <Badge variant="outline">{row.owner === "user" ? "USER" : row.owner}</Badge>}
+                  </div>
+                  <Accordion
+                    multiple
+                    value={openGroups}
+                    onValueChange={(ids) => setExpandedGroups({ filter: groupFilter, ids })}
+                    aria-label="Tasks by goal"
+                    className="space-y-2.5"
+                  >
+                    {groups.map((group) => {
+                      const items = rows.filter((row) => row.goal_id === group.id);
+                      if (!items.length && !goal) return null;
+                      const allInGoal = data.tasks.filter((row) => row.goal_id === group.id);
+                      const doneCount = allInGoal.filter((row) => row.state === "done").length;
+                      const blockedCount = allInGoal.filter((row) => row.state === "blocked").length;
+                      return (
+                        <AccordionItem key={group.id} value={group.id} data-goal-section={group.id} className="rounded-xl bg-card ring-1 ring-foreground/10">
+                          <div className="flex flex-wrap items-center gap-1 pr-2">
+                            <AccordionTrigger className="min-w-0 flex-1">
+                              <Badge variant="outline" className="font-mono">{group.id}</Badge>
+                              <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{plainTaskTitle(group.title)}</span>
+                              <span className="hidden text-xs text-muted-foreground tabular-nums sm:inline">
+                                {doneCount}/{allInGoal.length} done
                               </span>
-                              <span className={cn(
-                                "line-clamp-2 block text-sm leading-snug [overflow-wrap:anywhere]",
-                                row.state === "done" && selected !== row.id ? "font-normal text-muted-foreground" : "font-medium",
-                              )}>{titleParts(row.title).heading}</span>
-                            </span>
-                            <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                          </Button>
-                        </Card>
-                      </li>;
-                      })}
-                    </ul>
-                    </AccordionContent>
-                  </AccordionItem>;
-                })}
-                {!rows.length && <Card size="sm"><CardContent className={textClass}>No tasks match.</CardContent></Card>}
-              </Accordion>}
+                              {blockedCount > 0 && (
+                                <Badge variant="secondary" className={cn("tabular-nums", GOAL_STATE_STYLE.blocked.cls)}>
+                                  {blockedCount} blocked
+                                </Badge>
+                              )}
+                              <Badge variant="secondary" className="tabular-nums" aria-label={`${items.length} tasks`}>{items.length}</Badge>
+                            </AccordionTrigger>
+                            <Button
+                              type="button"
+                              size="xs"
+                              variant="outline"
+                              title={`Open ${group.id} 7-stage board`}
+                              className="h-8 gap-1 px-2 text-xs"
+                              onClick={() => { setGoalFilter(group.id); setViewMode("board"); }}
+                            >
+                              <Columns3 className="size-3.5" aria-hidden="true" />
+                              <span className="hidden sm:inline">Stage board</span>
+                            </Button>
+                            {admin && (
+                              <DropdownMenu>
+                                <DropdownMenuTrigger render={<Button size="icon" variant="ghost" className="size-9 touch:size-11" aria-label={`Actions for ${group.id}`}><MoreHorizontal /></Button>} />
+                                <DropdownMenuContent align="end" className="w-40">
+                                  <DropdownMenuItem className="touch:min-h-11" onClick={() => openEditor("goal", group)}>Rename goal</DropdownMenuItem>
+                                  <DropdownMenuItem className="touch:min-h-11" variant="destructive"
+                                    onClick={() => setRemove({ goal: group, count: allInGoal.length })}>Remove goal</DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            )}
+                          </div>
+                          <AccordionContent className="space-y-2.5">
+                            <Progress
+                              value={allInGoal.length ? 100 * doneCount / allInGoal.length : 0}
+                              aria-label={`${doneCount} of ${allInGoal.length} tasks done`}
+                            />
+                            {items.length > 0 ? (
+                              <ul className="space-y-2">
+                                {items.map((row) => (
+                                  <li key={row.id}>
+                                    <TaskRowCard
+                                      task={row}
+                                      selected={selected === row.id}
+                                      admin={admin}
+                                      onSelect={choose}
+                                      onOpenFile={openFile}
+                                      onOpenFolder={setBrowseFolder}
+                                    />
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <p className="px-1 py-2 text-xs text-muted-foreground">No matching tasks in {group.id}.</p>
+                            )}
+                          </AccordionContent>
+                        </AccordionItem>
+                      );
+                    })}
+                    {!rows.length && <Card size="sm"><CardContent className={textClass}>No tasks match.</CardContent></Card>}
+                  </Accordion>
+                </div>
+              )}
             </div>
           </div>
           {detailOpen && <div ref={detailRef} className="min-h-0 min-w-0 overflow-y-auto bg-muted/20 p-3 sm:p-5">
@@ -387,7 +633,7 @@ export function GoalsView() {
                       <StateBadge task={task} />
                       <DecisionBadge decision={task.decision} />
                       <StageBadge stage={parsedDetail?.stage ?? null} parsed={parsedDetail ?? undefined} />
-                      <Badge variant="outline">{task.priority} priority</Badge>
+                      <PriorityBadge priority={task.priority} />
                       <Badge variant="outline">{task.owner === "user" ? "USER" : task.owner || "Unassigned"}</Badge>
                     </> : <Badge variant="secondary"><Tag /> Triage</Badge>}
                     <Button size="icon" variant="ghost" className="ml-auto hidden size-9 min-[900px]:inline-flex" aria-label="Close task details" title="Close details" onClick={() => choose("")}><X /></Button>
@@ -491,9 +737,19 @@ export function GoalsView() {
                           disabled={busy || !path.trim()}><Link2 /> Link</Button>
                       </form>
                       <p className={textClass}>Link an existing repository file, or upload a copy to Mailroom attachments.</p>
-                      <Button size="sm" variant="outline" className="h-10 touch:h-11" disabled={busy} onClick={() => uploadRef.current?.click()}>
-                        <Upload /> Upload to task
-                      </Button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button size="sm" variant="outline" className="h-10 touch:h-11" disabled={busy} onClick={() => uploadRef.current?.click()}>
+                          <Upload /> Upload to task
+                        </Button>
+                        {detailDocLinks && (
+                          <OpenFolderAction
+                            admin={admin}
+                            folders={detailDocLinks.ownedFolders}
+                            onOpenFolder={setBrowseFolder}
+                            size="sm"
+                          />
+                        )}
+                      </div>
                       <Input type="file" ref={uploadRef} hidden disabled={busy} onChange={async (event) => {
                         const file = event.target.files?.[0];
                         event.target.value = "";
@@ -517,27 +773,42 @@ export function GoalsView() {
                       ? task ? `No documents linked to ${task.id} yet. File attachments on tagged messages also appear here.` : "No recent untagged documents."
                       : "Loading documents…"}</CardContent>
                   </Card>}
-                  <ul className="space-y-2">
-                    {evidence?.files.map((file) => {
-                      const href = fileHref(file);
-                      const filename = file.split("/").at(-1);
-                      return href && <li key={file}>
-                        <Card size="sm" className="flex-row items-center justify-between gap-2 p-2">
-                          <Button variant="ghost" className="h-auto min-h-11 min-w-0 flex-1 justify-start gap-2 whitespace-normal" onClick={() => openFile({ href, path: file })}>
-                            <FileText className="size-4 shrink-0 text-muted-foreground" />
-                            <span className="min-w-0 text-left">
-                              <span className="block text-sm [overflow-wrap:anywhere]">{filename}</span>
-                              <span className="line-clamp-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">{file}</span>
-                            </span>
-                          </Button>
-                          {task && evidence.manual_files.includes(file) && <Button size="sm" variant="ghost" className="h-10 touch:h-11"
-                            onClick={() => void act({ action: "unlink", id: task.id, path: file }, "Manual link removed")}>Unlink</Button>}
-                          {!task && <Button size="sm" variant="outline" className="h-10 touch:h-11" disabled={!linkTarget || busy}
-                            onClick={() => void act({ action: "link", id: linkTarget, path: file }, "File linked")}>Link</Button>}
-                        </Card>
-                      </li>;
-                    })}
-                  </ul>
+                  {task && evidence?.files.length ? (() => {
+                    const ownedPrefixes = (detailDocLinks?.ownedFolders ?? []).map((f) => `${f.folder}/`);
+                    const folderFiles = evidence.files.filter((file) => ownedPrefixes.some((p) => file.startsWith(p)));
+                    const relatedFiles = evidence.files.filter((file) => !ownedPrefixes.some((p) => file.startsWith(p)));
+                    return (
+                      <div className="space-y-4">
+                        {folderFiles.length > 0 && (
+                          <section data-section="task-folder-documents" aria-label="Task folder documents" className="space-y-2">
+                            <div className="flex items-center gap-2">
+                              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Task folder documents</h3>
+                              <Badge variant="secondary" className="tabular-nums">{folderFiles.length}</Badge>
+                            </div>
+                            <ul className="space-y-2">
+                              {folderFiles.map((file) => renderDocFileItem(file, evidence.manual_files.includes(file)))}
+                            </ul>
+                          </section>
+                        )}
+                        {relatedFiles.length > 0 && (
+                          <section data-section="related-evidence" aria-label="Related evidence" className="space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Related evidence</h3>
+                              <Badge variant="secondary" className="tabular-nums">{relatedFiles.length}</Badge>
+                              <span className="text-xs text-muted-foreground">Linked references and attachments outside this task&apos;s folder</span>
+                            </div>
+                            <ul className="space-y-2">
+                              {relatedFiles.map((file) => renderDocFileItem(file, evidence.manual_files.includes(file)))}
+                            </ul>
+                          </section>
+                        )}
+                      </div>
+                    );
+                  })() : (
+                    <ul className="space-y-2">
+                      {evidence?.files.map((file) => renderDocFileItem(file, !!task && evidence.manual_files.includes(file)))}
+                    </ul>
+                  )}
                 </TabsContent>}
                 {tab !== "overview" && (page > 0 || (page + 1) * pageSize < (tab === "discussion" ? evidence?.total ?? 0 : evidence?.file_total ?? 0)) && (
                   <div className="flex justify-between">
@@ -609,6 +880,13 @@ export function GoalsView() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <RepoFolderDialog
+        open={!!browseFolder}
+        rootPath={browseFolder?.folder ?? ""}
+        title={browseFolder?.label}
+        onOpenChange={(open) => { if (!open) setBrowseFolder(null); }}
+        onOpenFile={openFile}
+      />
     </div>
   );
 }

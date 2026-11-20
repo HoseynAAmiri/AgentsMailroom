@@ -14,9 +14,12 @@ const {
   extractTaskDocLinks,
   groupTasksByStage,
   isFutureOutlier,
+  isTaskReadyNext,
   latestActivityTs,
   parseTaskStage,
+  priorityRank,
   resolveActivityNow,
+  sortTasksByPriority,
 } = (await import(new URL("./format.ts", import.meta.url).href)) as typeof FormatModule;
 
 const NOW = Date.parse("2026-11-19T08:00:00Z");
@@ -290,10 +293,22 @@ test("extractTaskDocLinks classifies goal folders, context, dossier, PDF, and mu
         extra: [],
       },
     ],
+    ownedFolders: [
+      {
+        folder: "docs/goals-and-tasks/G1/g1_1_ibamr_examples_and_first_checks",
+        label: "G1/g1_1_ibamr_examples_and_first_checks",
+        slug: "g1_1_ibamr_examples_and_first_checks",
+        context: "docs/goals-and-tasks/G1/g1_1_ibamr_examples_and_first_checks/context.md",
+        dossier: "docs/goals-and-tasks/G1/g1_1_ibamr_examples_and_first_checks/dossier.md",
+        pdf: "docs/goals-and-tasks/G1/g1_1_ibamr_examples_and_first_checks/g1_1_ibamr_examples_and_first_checks.pdf",
+        extra: [],
+      },
+    ],
+    relatedLinks: ["docs/PLAN.md"],
     other: ["docs/PLAN.md"],
   });
 
-  // Canonical G7.13 task folder wins over earlier alphabetical cross-goal PDFs while preserving all reports
+  // Canonical G7.13 task folder owns only G7/g7_13_paper_dismantle; cross-links stay in relatedLinks
   const g713 = extractTaskDocLinks([
     "docs/PAPER_PARTS_MAP.md",
     "docs/goals-and-tasks/G1/g1_3_constitutive_and_ibfe_formulation/g1_3_constitutive_and_ibfe_formulation.pdf",
@@ -307,6 +322,12 @@ test("extractTaskDocLinks classifies goal folders, context, dossier, PDF, and mu
   assert.equal(g713.dossier, "docs/goals-and-tasks/G7/g7_13_paper_dismantle/dossier.md");
   assert.equal(g713.pdf, "docs/goals-and-tasks/G7/g7_13_paper_dismantle/g7_13_paper_dismantle.pdf");
   assert.equal(g713.folders.length, 3);
+  assert.deepEqual(g713.ownedFolders.map((f) => f.label), ["G7/g7_13_paper_dismantle"]);
+  assert.deepEqual(g713.relatedLinks, [
+    "docs/PAPER_PARTS_MAP.md",
+    "docs/goals-and-tasks/G1/g1_3_constitutive_and_ibfe_formulation/g1_3_constitutive_and_ibfe_formulation.pdf",
+    "docs/goals-and-tasks/G5/g5_1_sideview_coverage_comparison/g5_1_sideview_coverage_comparison.pdf",
+  ]);
   assert.deepEqual(g713.folders.slice(1).map((f) => f.label), [
     "G1/g1_3_constitutive_and_ibfe_formulation",
     "G5/g5_1_sideview_coverage_comparison",
@@ -317,7 +338,7 @@ test("extractTaskDocLinks classifies goal folders, context, dossier, PDF, and mu
     "docs/goals-and-tasks/G5/g5_1_sideview_coverage_comparison/g5_1_sideview_coverage_comparison.pdf",
   ]);
 
-  // Multi-report G2.10 prioritizes canonical g2_10 folder while retaining platen companion folders
+  // Multi-report G2.10 prioritizes canonical g2_10 folder while owning all three G2 platen/afm folders
   const g210 = extractTaskDocLinks([
     "docs/goals-and-tasks/G2/g2_10_afm_and_viscoelastic_verification/context.md",
     "docs/goals-and-tasks/G2/g2_10_afm_and_viscoelastic_verification/dossier.md",
@@ -330,6 +351,48 @@ test("extractTaskDocLinks classifies goal folders, context, dossier, PDF, and mu
   assert.equal(g210.folderLabel, "G2/g2_10_afm_and_viscoelastic_verification");
   assert.equal(g210.pdf, "docs/goals-and-tasks/G2/g2_10_afm_and_viscoelastic_verification/g2_10_afm_and_viscoelastic_verification.pdf");
   assert.deepEqual(g210.folders.slice(1).map((f) => f.label), ["G2/platen_dt_halving", "G2/platen_force"]);
+  assert.deepEqual(g210.ownedFolders.map((f) => f.label), [
+    "G2/g2_10_afm_and_viscoelastic_verification",
+    "G2/platen_dt_halving",
+    "G2/platen_force",
+  ]);
+  assert.deepEqual(g210.relatedLinks, []);
+
+  // Multi-report G8.3 owns all 5 G8 folders
+  const g83 = extractTaskDocLinks([
+    "docs/goals-and-tasks/G8/b1_upstream_start/b1_upstream_start.pdf",
+    "docs/goals-and-tasks/G8/b2_bulk_modulus/b2_bulk_modulus.pdf",
+    "docs/goals-and-tasks/G8/h01_lc060_refinement/h01_lc060_refinement.pdf",
+    "docs/goals-and-tasks/G8/half_drive/half_drive.pdf",
+    "docs/goals-and-tasks/G8/half_dt/half_dt.pdf",
+  ], "G8.3");
+  assert.equal(g83.ownedFolders.length, 5);
+  assert.deepEqual(g83.relatedLinks, []);
+
+  // Same-goal cross-link to another numbered task stays in relatedLinks rather than ownedFolders
+  const g27 = extractTaskDocLinks([
+    "docs/goals-and-tasks/G2/g2_7_symmetric_case_scope/context.md",
+    "docs/goals-and-tasks/G2/g2_7_symmetric_case_scope/g2_7_symmetric_case_scope.pdf",
+    "docs/goals-and-tasks/G2/g2_3_half_z_symmetry_validation/dossier.md",
+  ], "G2.7");
+  assert.deepEqual(g27.ownedFolders.map((f) => f.label), ["G2/g2_7_symmetric_case_scope"]);
+  assert.deepEqual(g27.relatedLinks, ["docs/goals-and-tasks/G2/g2_3_half_z_symmetry_validation/dossier.md"]);
+
+  // Attachment-only task owns 0 repo folders and surfaces the attachment under relatedLinks
+  const g35 = extractTaskDocLinks(["coordination/attachments/2026-11-18_e1959_ridge64_duct64_review/report.md"], "G3.5");
+  assert.deepEqual(g35.ownedFolders, []);
+  assert.deepEqual(g35.relatedLinks, ["coordination/attachments/2026-11-18_e1959_ridge64_duct64_review/report.md"]);
+
+  // External-only goal link never promotes another task's PDF as primary
+  const g713NoOwn = extractTaskDocLinks([
+    "docs/goals-and-tasks/G1/g1_3_constitutive_and_ibfe_formulation/g1_3_constitutive_and_ibfe_formulation.pdf",
+  ], "G7.13");
+  assert.equal(g713NoOwn.folder, null);
+  assert.equal(g713NoOwn.pdf, null);
+  assert.deepEqual(g713NoOwn.ownedFolders, []);
+  assert.deepEqual(g713NoOwn.relatedLinks, [
+    "docs/goals-and-tasks/G1/g1_3_constitutive_and_ibfe_formulation/g1_3_constitutive_and_ibfe_formulation.pdf",
+  ]);
 
   const ctxOnly = extractTaskDocLinks(["docs/goals-and-tasks/G6/g6_12_task_logic/context.md"], "G6.12");
   assert.equal(ctxOnly.folderLabel, "G6/g6_12_task_logic");
@@ -345,8 +408,33 @@ test("extractTaskDocLinks classifies goal folders, context, dossier, PDF, and mu
     dossier: null,
     pdf: null,
     folders: [],
+    ownedFolders: [],
+    relatedLinks: [],
     other: [],
   });
+});
+
+test("sortTasksByPriority and isTaskReadyNext preserve order and exclude blocked, done, and decisions", () => {
+  const sample = [
+    { id: "A", priority: "low", state: "todo", decision: 0 },
+    { id: "B", priority: "normal", state: "doing", decision: 0 },
+    { id: "C", priority: "high", state: "blocked", decision: 1 },
+    { id: "D", priority: "normal", state: "done", decision: 0 },
+    { id: "E", priority: "high", state: "todo", decision: 0 },
+    { id: "F", priority: "low", state: "blocked", decision: 0 },
+  ];
+  assert.equal(priorityRank("high"), 0);
+  assert.equal(priorityRank("normal"), 1);
+  assert.equal(priorityRank("low"), 2);
+  assert.equal(priorityRank("unexpected"), 1);
+  assert.deepEqual(
+    sortTasksByPriority(sample).map((t) => t.id),
+    ["C", "E", "B", "D", "A", "F"],
+  );
+  assert.deepEqual(
+    sample.filter(isTaskReadyNext).map((t) => t.id),
+    ["A", "B", "E"],
+  );
 });
 
 test("groupTasksByStage places all 7 canonical stages and preserves malformed/unprefixed rows in unstaged", () => {

@@ -30,7 +30,9 @@ class StandaloneSmoke(unittest.TestCase):
     def exercise(self, fixture):
         store = fixture / "data"
         workspace = fixture / "workspace"
-        workspace.mkdir()
+        demo_dir = workspace / "docs" / "goals-and-tasks" / "G1" / "g1_1_demo"
+        demo_dir.mkdir(parents=True)
+        (demo_dir / "context.md").write_text("# Demo G1.1 context\n")
         web = fixture / "web"
         web.mkdir()
         (web / "index.html").write_text("<title>Mailroom smoke fixture</title>")
@@ -127,6 +129,16 @@ class StandaloneSmoke(unittest.TestCase):
                 self.assertNotIn("links", detail_pub["task"])
                 self.assertNotIn(uploaded["name"], json.dumps(detail_pub))
                 self.assertNotIn("docs/goals-and-tasks/G1/g1_1_demo/context.md", json.dumps(detail_pub))
+
+                with self.assertRaises(HTTPError) as denied_dir:
+                    read(public, "/api/repo-dir?path=docs/goals-and-tasks/G1/g1_1_demo")
+                self.assertEqual(denied_dir.exception.code, 403)
+                docs_listing = read(admin, "/api/repo-dir?path=docs/goals-and-tasks/G1/g1_1_demo")
+                self.assertEqual(docs_listing["path"], "docs/goals-and-tasks/G1/g1_1_demo")
+                self.assertTrue(any(e["name"] == "context.md" and e["viewable"] for e in docs_listing["entries"]))
+                with self.assertRaises(HTTPError) as bad_dir:
+                    read(admin, "/api/repo-dir?path=../bus")
+                self.assertEqual(bad_dir.exception.code, 404)
             finally:
                 server.terminate()
                 try:

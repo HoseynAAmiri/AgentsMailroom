@@ -184,6 +184,8 @@ class BoundaryAndDefaultsTest(unittest.TestCase):
         (self.repo / "escape_hidden.md").symlink_to(self.repo / ".secret.md")
         (self.repo / "docs" / "doc_escape_store.md").symlink_to(self.store / "bus" / "agents.json")
         (self.repo / "docs" / "doc_escape_hidden.md").symlink_to(self.repo / ".secret.md")
+        (self.repo / "docs" / "dir_escape_store").symlink_to(self.store / "bus")
+        (self.repo / "docs" / "dir_escape_store_attach").symlink_to(self.store / "attachments")
 
         self.env = {
             "HOME": str(self.root / "home"),
@@ -308,6 +310,32 @@ class BoundaryAndDefaultsTest(unittest.TestCase):
                 post_todo({"action": "link", "id": "G1.1", "path": bad_link})
             self.assertEqual(err.exception.code, 400)
             err.exception.close()
+
+        # Admin-only /api/repo-dir boundary & escape checks
+        with self.assertRaises(HTTPError) as pub_err:
+            urlopen(f"http://127.0.0.1:{public}/api/repo-dir?path=docs", timeout=5)
+        self.assertEqual(pub_err.exception.code, 403)
+        pub_err.exception.close()
+
+        repo_docs = json.loads(urlopen(f"http://127.0.0.1:{admin}/api/repo-dir?path=docs", timeout=5).read())
+        self.assertEqual(repo_docs["path"], "docs")
+        entry_names = [e["name"] for e in repo_docs["entries"]]
+        self.assertIn("ok.md", entry_names)
+        self.assertNotIn("doc_escape_store.md", entry_names)
+        self.assertNotIn("doc_escape_hidden.md", entry_names)
+        self.assertNotIn("dir_escape_store", entry_names)
+        self.assertNotIn("dir_escape_store_attach", entry_names)
+        ok_entry = next(e for e in repo_docs["entries"] if e["name"] == "ok.md")
+        self.assertTrue(ok_entry["viewable"])
+
+        repo_root = json.loads(urlopen(f"http://127.0.0.1:{admin}/api/repo-dir?path=", timeout=5).read())
+        self.assertNotIn("store", [e["name"] for e in repo_root["entries"]])
+
+        for bad_dir in (".secret", "../outside", "store", "docs/dir_escape_store", "docs/dir_escape_store_attach", "docs/ok.md", "docs/missing"):
+            with self.assertRaises(HTTPError, msg=f"expected 404 for repo-dir {bad_dir}") as dir_err:
+                urlopen(f"http://127.0.0.1:{admin}/api/repo-dir?path={bad_dir}", timeout=5)
+            self.assertEqual(dir_err.exception.code, 404)
+            dir_err.exception.close()
 
     def test_missing_store_refused_and_ingress_gate(self):
         missing = self.root / "missing-store"

@@ -208,6 +208,29 @@ export const GOAL_STATE_STYLE: Record<MailTask["state"], { label: string; cls: s
   done: { label: "Done", cls: "border border-border bg-transparent text-muted-foreground" },
 };
 
+export const PRIORITY_RANK = { high: 0, normal: 1, low: 2 } as const;
+
+export const PRIORITY_STYLE: Record<"high" | "normal" | "low", { label: string; cls: string }> = {
+  high: { label: "High", cls: "border-rose-500/40 bg-rose-500/15 text-rose-700 dark:text-rose-300" },
+  normal: { label: "Normal", cls: "border-border bg-muted/60 text-muted-foreground" },
+  low: { label: "Low", cls: "border-slate-400/35 bg-slate-500/10 text-slate-600 dark:text-slate-400" },
+};
+
+export function priorityRank(priority?: string | null): number {
+  const key = (priority ?? "normal").toLowerCase();
+  return key in PRIORITY_RANK ? PRIORITY_RANK[key as keyof typeof PRIORITY_RANK] : PRIORITY_RANK.normal;
+}
+
+/** Return a copy sorted High > Normal > Low while preserving original order within each tier. */
+export function sortTasksByPriority<T extends { priority?: string | null }>(tasks: readonly T[]): T[] {
+  return [...tasks].sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority));
+}
+
+/** True when a task is actionable right now (not blocked, not done, and not held on a USER decision). */
+export function isTaskReadyNext(task: { state: string; decision?: number | boolean | null }): boolean {
+  return task.state !== "blocked" && task.state !== "done" && !task.decision;
+}
+
 export const TASK_STAGES = [
   "Inbox",
   "Assign",
@@ -278,11 +301,14 @@ export interface TaskDocLinks {
   dossier: string | null;
   pdf: string | null;
   folders: TaskDocFolder[];
+  ownedFolders: TaskDocFolder[];
+  relatedLinks: string[];
   other: string[];
 }
 
 const GOAL_FOLDER_RE = /^(docs\/goals-and-tasks\/((G[1-9]\d*)\/([^/]+)))\//;
 const TASK_ID_RE = /^([A-Za-z]+\d+)\.(\d+)$/;
+const NUMBERED_TASK_SLUG_RE = /^g(\d+)_(\d+)(?:_|$)/i;
 
 /** Classify a task's linked repository paths, prioritizing its canonical task folder while keeping multi-report links reachable. */
 export function extractTaskDocLinks(links?: readonly string[] | null, taskId?: string | null): TaskDocLinks {
@@ -401,16 +427,34 @@ export function extractTaskDocLinks(links?: readonly string[] | null, taskId?: s
     });
 
   const folders = ranked.map((r) => r.doc);
+  let ownedEntries = ranked;
+  if (taskGoalDir) {
+    const sameGoal = ranked.filter((r) => r.goal === taskGoalDir);
+    const nonOtherTask = sameGoal.filter((r) => {
+      const sm = NUMBERED_TASK_SLUG_RE.exec(r.doc.slug);
+      if (!sm) return true;
+      return `g${sm[1]}_${sm[2]}` === taskSlugPrefix;
+    });
+    ownedEntries = nonOtherTask.length > 0 ? nonOtherTask : sameGoal;
+  }
+  const ownedFolders = ownedEntries.map((r) => r.doc);
+  const ownedPrefixes = ownedFolders.map((f) => `${f.folder}/`);
+  const relatedLinks = unique.filter((item) => !ownedPrefixes.some((prefix) => item.startsWith(prefix)));
+
   if (folders.length > 0) {
-    const primary = folders[0];
-    const primarySet = new Set([primary.context, primary.dossier, primary.pdf].filter((p): p is string => !!p));
+    const primary = ownedFolders[0] ?? null;
+    const primarySet = primary
+      ? new Set([primary.context, primary.dossier, primary.pdf].filter((p): p is string => !!p))
+      : new Set<string>();
     return {
-      folder: primary.folder,
-      folderLabel: primary.label,
-      context: primary.context,
-      dossier: primary.dossier,
-      pdf: primary.pdf,
+      folder: primary?.folder ?? null,
+      folderLabel: primary?.label ?? null,
+      context: primary?.context ?? null,
+      dossier: primary?.dossier ?? null,
+      pdf: primary?.pdf ?? null,
       folders,
+      ownedFolders,
+      relatedLinks,
       other: unique.filter((item) => !primarySet.has(item)),
     };
   }
@@ -439,6 +483,8 @@ export function extractTaskDocLinks(links?: readonly string[] | null, taskId?: s
     dossier,
     pdf,
     folders: [],
+    ownedFolders: [],
+    relatedLinks: unique,
     other,
   };
 }
