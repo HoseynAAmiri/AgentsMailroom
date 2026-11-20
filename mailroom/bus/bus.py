@@ -1610,6 +1610,7 @@ def upsert_agent(req: dict[str, Any]) -> dict[str, Any]:
             data.setdefault("agents", []).append(a)
         elif a.get("kind") == "temporary":
             raise ValueError("temporary agents are managed by summon/stop")
+        prev_preset = a.get("role_preset")
         for k in AGENT_FIELDS:
             if k in req:
                 a[k] = req[k]
@@ -1623,13 +1624,24 @@ def upsert_agent(req: dict[str, Any]) -> dict[str, Any]:
                 a["role"] = ROLE_PRESETS[preset_key]["label"].lower()
             else:
                 a["role_preset"] = None
-        elif "role" in req and a.get("role_preset"):
+        elif "role" in req:
             role_val = (a.get("role") or "").strip().lower()
             matched = next(
                 (k for k, v in ROLE_PRESETS.items() if k == role_val or v["label"].lower() == role_val),
                 None,
             )
             a["role_preset"] = matched
+            if matched:
+                a["role"] = ROLE_PRESETS[matched]["label"].lower()
+        preset_prompts = {v["prompt"].strip() for v in ROLE_PRESETS.values()}
+        raw_prompt = (a.get("role_prompt") or "").strip() if isinstance(a.get("role_prompt"), str) else ""
+        if not raw_prompt:
+            if "role_prompt" in req or a.get("role_prompt") == "":
+                a["role_prompt"] = None
+        elif a.get("role_preset") and raw_prompt in preset_prompts:
+            a["role_prompt"] = None
+        elif prev_preset and not a.get("role_preset") and "role_prompt" not in req and raw_prompt in preset_prompts:
+            a["role_prompt"] = None
         if a.get("retired"):
             a["state"] = "offline"
         save_agents(data)

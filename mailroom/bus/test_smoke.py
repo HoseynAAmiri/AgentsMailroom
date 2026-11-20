@@ -188,6 +188,59 @@ class StandaloneSmoke(unittest.TestCase):
                 cleared_preset = read(admin, "/api/agents", post={"id": "role_probe", "role": "custom_only"})
                 self.assertEqual(cleared_preset["role"], "custom_only")
                 self.assertIsNone(cleared_preset["role_preset"])
+                rebound_preset = read(admin, "/api/agents", post={"id": "role_probe", "role": "Worker"})
+                self.assertEqual((rebound_preset["role"], rebound_preset["role_preset"]), ("worker", "worker"))
+
+                # Legacy saved-default fixture: stored preset prompt does not shadow newly typed/selected preset.
+                bus_dir = str(ROOT / "mailroom/bus")
+                if bus_dir not in sys.path:
+                    sys.path.insert(0, bus_dir)
+                import bus
+                legacy_default = bus.ROLE_PRESETS["orchestrator"]["prompt"]
+                read(admin, "/api/agents", post={
+                    "id": "role_probe",
+                    "role": "orchestrator",
+                    "role_preset": "orchestrator",
+                    "role_prompt": legacy_default,
+                })
+                typed_switch = read(admin, "/api/agents", post={
+                    "id": "role_probe",
+                    "role": "reviewer",
+                    "role_preset": "reviewer",
+                    "role_prompt": legacy_default,
+                })
+                self.assertEqual((typed_switch["role"], typed_switch["role_preset"]), ("reviewer", "reviewer"))
+                self.assertIsNone(typed_switch["role_prompt"])
+                self.assertEqual(bus.role_text(typed_switch), bus.ROLE_PRESETS["reviewer"]["prompt"])
+                snap_typed = next(a for a in read(admin, "/api/snapshot")["agents"] if a["id"] == "role_probe")
+                reg_typed = next(a for a in read(admin, "/api/agents")["agents"] if a["id"] == "role_probe")
+                self.assertIsNone(snap_typed["role_prompt"])
+                self.assertIsNone(reg_typed["role_prompt"])
+
+                read(admin, "/api/agents", post={
+                    "id": "role_probe",
+                    "role": "orchestrator",
+                    "role_preset": "orchestrator",
+                    "role_prompt": legacy_default,
+                })
+                role_only_switch = read(admin, "/api/agents", post={"id": "role_probe", "role": "worker"})
+                self.assertEqual((role_only_switch["role"], role_only_switch["role_preset"]), ("worker", "worker"))
+                self.assertIsNone(role_only_switch["role_prompt"])
+                self.assertEqual(bus.role_text(role_only_switch), bus.ROLE_PRESETS["worker"]["prompt"])
+
+                # Genuine custom role_prompt survives switching via role_preset or role-only patch.
+                read(admin, "/api/agents", post={
+                    "id": "role_probe",
+                    "role": "reviewer",
+                    "role_preset": "reviewer",
+                    "role_prompt": "Custom reviewer override.",
+                })
+                preset_custom = read(admin, "/api/agents", post={"id": "role_probe", "role": "orchestrator", "role_preset": "orchestrator"})
+                self.assertEqual((preset_custom["role"], preset_custom["role_preset"]), ("orchestrator", "orchestrator"))
+                self.assertEqual(bus.role_text(preset_custom), "Custom reviewer override.")
+                role_only_custom = read(admin, "/api/agents", post={"id": "role_probe", "role": "worker"})
+                self.assertEqual((role_only_custom["role"], role_only_custom["role_preset"]), ("worker", "worker"))
+                self.assertEqual(bus.role_text(role_only_custom), "Custom reviewer override.")
 
                 with self.assertRaises(HTTPError) as bad_preset:
                     read(admin, "/api/agents", post={"id": "role_probe", "role_preset": "not_a_preset"})

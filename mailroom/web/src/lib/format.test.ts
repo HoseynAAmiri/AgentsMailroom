@@ -20,6 +20,7 @@ const {
   findMatchingRolePreset,
   groupTasksByStage,
   isFutureOutlier,
+  isPresetDefaultPrompt,
   isTaskInProgress,
   isTaskReadyNext,
   latestActivityTs,
@@ -575,12 +576,74 @@ test("role preset helpers keep role, role_preset, and role_prompt synchronized",
   assert.equal(customPromptKept.role_preset, "reviewer");
   assert.equal(customPromptKept.role_prompt, "Custom instruction line.");
 
-  // Typing a preset name in the Role label input syncs role_preset; typing a custom role clears it.
+  assert.equal(isPresetDefaultPrompt("", roles), true);
+  assert.equal(isPresetDefaultPrompt("  Plan and delegate.  ", roles), true);
+  assert.equal(isPresetDefaultPrompt("Custom orchestrator rule.", roles), false);
+
+  // Typing a preset name in the Role label input syncs role_preset & prompt; typing a custom role clears them when uncustomized.
   const typedPreset = applyRoleLabelChange({ id: "a1", role: "orchestrator", role_preset: "orchestrator" }, "Reviewer", roles);
   assert.equal(typedPreset.role_preset, "reviewer");
-  const typedCustom = applyRoleLabelChange({ id: "a1", role: "reviewer", role_preset: "reviewer" }, "Custom Lead", roles);
+  assert.equal(typedPreset.role_prompt, "Verify and referee.");
+  const typedCustom = applyRoleLabelChange(
+    { id: "a1", role: "reviewer", role_preset: "reviewer", role_prompt: "Verify and referee." },
+    "Custom Lead",
+    roles,
+  );
   assert.equal(typedCustom.role_preset, null);
   assert.equal(typedCustom.role, "Custom Lead");
+  assert.equal(typedCustom.role_prompt, "");
+
+  // Legacy saved-default fixture: stored preset prompt behaves identically across keystroke typing and pill click.
+  const legacySavedDefault = {
+    id: "a1",
+    role: "orchestrator",
+    role_preset: "orchestrator",
+    role_prompt: roles.orchestrator.prompt,
+  };
+  let typedForm: Partial<Agent> = { ...legacySavedDefault };
+  for (const partial of ["R", "Rev", "Reviewer"]) {
+    typedForm = applyRoleLabelChange(typedForm, partial, roles);
+  }
+  const clickedForm = applyRolePresetSelection(legacySavedDefault, "reviewer", roles);
+  assert.equal(typedForm.role_preset, "reviewer");
+  assert.equal(typedForm.role_prompt, roles.reviewer.prompt);
+  assert.deepEqual(buildAgentUpsertPayload(typedForm, roles), buildAgentUpsertPayload(clickedForm, roles));
+  assert.equal(buildAgentUpsertPayload(typedForm, roles).role, "reviewer");
+  assert.equal(buildAgentUpsertPayload(typedForm, roles).role_preset, "reviewer");
+  assert.equal(buildAgentUpsertPayload(typedForm, roles).role_prompt, null);
+
+  // Direct buildAgentUpsertPayload call carrying stale preset prompt under a switched preset still normalizes to null.
+  const staleCarryPayload = buildAgentUpsertPayload(
+    { id: "a1", role: "Reviewer", role_preset: "reviewer", role_prompt: roles.orchestrator.prompt },
+    roles,
+  );
+  assert.equal(staleCarryPayload.role, "reviewer");
+  assert.equal(staleCarryPayload.role_preset, "reviewer");
+  assert.equal(staleCarryPayload.role_prompt, null);
+
+  // Typing "Custom Lead" on legacy saved-default fixture clears old preset prompt so null is saved.
+  const customFromLegacy = applyRoleLabelChange(legacySavedDefault, "Custom Lead", roles);
+  assert.equal(customFromLegacy.role_preset, null);
+  assert.equal(customFromLegacy.role_prompt, "");
+  assert.equal(buildAgentUpsertPayload(customFromLegacy, roles).role_prompt, null);
+
+  // Genuine custom override is preserved identically across typed preset, clicked pill, and typed custom role.
+  const customAgent = {
+    id: "a1",
+    role: "orchestrator",
+    role_preset: "orchestrator",
+    role_prompt: "Custom orchestrator rule.",
+  };
+  const customTypedReviewer = applyRoleLabelChange(
+    applyRoleLabelChange(customAgent, "Rev", roles),
+    "Reviewer",
+    roles,
+  );
+  const customClickedReviewer = applyRolePresetSelection(customAgent, "reviewer", roles);
+  const customTypedLead = applyRoleLabelChange(customAgent, "Custom Lead", roles);
+  assert.deepEqual(buildAgentUpsertPayload(customTypedReviewer, roles), buildAgentUpsertPayload(customClickedReviewer, roles));
+  assert.equal(buildAgentUpsertPayload(customTypedReviewer, roles).role_prompt, "Custom orchestrator rule.");
+  assert.equal(buildAgentUpsertPayload(customTypedLead, roles).role_prompt, "Custom orchestrator rule.");
 
   // Save payload syncs stale role with valid role_preset and normalizes preset-identical prompt to null.
   const staleSynced = buildAgentUpsertPayload(

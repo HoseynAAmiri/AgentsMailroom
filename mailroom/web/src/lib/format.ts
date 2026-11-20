@@ -654,6 +654,15 @@ export function findMatchingRolePreset(
   return null;
 }
 
+/** Return true when prompt is empty/whitespace or matches any known role preset's default prompt text. */
+export function isPresetDefaultPrompt(
+  prompt: string | null | undefined,
+  roles: Readonly<Record<string, RolePresetInfo>>,
+): boolean {
+  const trimmed = (prompt ?? "").trim();
+  return !trimmed || Object.values(roles).some((r) => r.prompt.trim() === trimmed);
+}
+
 /** Apply a role preset pill click, syncing role label and updating default prompt when uncustomized. */
 export function applyRolePresetSelection(
   form: Partial<Agent>,
@@ -662,39 +671,41 @@ export function applyRolePresetSelection(
 ): Partial<Agent> {
   const preset = roles[presetKey];
   if (!preset) return form;
-  const currentPrompt = (form.role_prompt ?? "").trim();
-  const isUneditedOrPresetPrompt = !currentPrompt || Object.values(roles).some((r) => r.prompt.trim() === currentPrompt);
   return {
     ...form,
     role_preset: presetKey,
     role: preset.label.toLowerCase(),
-    role_prompt: isUneditedOrPresetPrompt ? preset.prompt : form.role_prompt,
+    role_prompt: isPresetDefaultPrompt(form.role_prompt, roles) ? preset.prompt : form.role_prompt,
   };
 }
 
-/** Update the Role label text input and sync/clear role_preset when the label matches a preset. */
+/** Update the Role label text input, sync/clear role_preset, and keep preset-default prompts in sync. */
 export function applyRoleLabelChange(
   form: Partial<Agent>,
   roleValue: string,
   roles: Readonly<Record<string, RolePresetInfo>>,
 ): Partial<Agent> {
+  const matchedPreset = findMatchingRolePreset(roleValue, roles);
+  const preset = matchedPreset ? roles[matchedPreset] : undefined;
   return {
     ...form,
     role: roleValue,
-    role_preset: findMatchingRolePreset(roleValue, roles),
+    role_preset: matchedPreset,
+    role_prompt: isPresetDefaultPrompt(form.role_prompt, roles) ? (preset ? preset.prompt : "") : form.role_prompt,
   };
 }
 
-/** Build an `/api/agents` upsert payload with role synced to any valid preset and preset-identical prompt normalized to null. */
+/** Build an `/api/agents` upsert payload with role synced to any valid preset and preset-default prompt normalized to null. */
 export function buildAgentUpsertPayload(
   form: Partial<Agent>,
   roles: Readonly<Record<string, RolePresetInfo>>,
 ): Partial<Agent> & { id: string } {
-  const presetKey = form.role_preset && roles[form.role_preset] ? form.role_preset : null;
+  const presetKey =
+    form.role_preset && roles[form.role_preset] ? form.role_preset : findMatchingRolePreset(form.role, roles);
   const preset = presetKey ? roles[presetKey] : undefined;
   const role = preset ? preset.label.toLowerCase() : (form.role?.trim() || "");
   const rawPrompt = (form.role_prompt ?? "").trim();
-  const rolePrompt = !rawPrompt || (preset && rawPrompt === preset.prompt.trim()) ? null : rawPrompt;
+  const rolePrompt = !rawPrompt || (preset && isPresetDefaultPrompt(rawPrompt, roles)) ? null : rawPrompt;
   return {
     id: String(form.id ?? "").trim(),
     name: form.name?.trim(),
