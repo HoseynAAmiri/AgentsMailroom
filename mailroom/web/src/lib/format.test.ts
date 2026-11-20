@@ -209,7 +209,7 @@ test("e2506/e2510: snapshot arrival advances shared evaluation clock across even
 });
 
 test("parseTaskStage enforces strict D38 [Stage] tokens without coercing malformed rows", () => {
-  assert.deepEqual([...TASK_STAGES], ["Inbox", "Assign", "Stage", "Run", "Review", "Done", "Result"]);
+  assert.deepEqual([...TASK_STAGES], ["Inbox", "Assign", "Stage", "Run", "Review", "Done"]);
   for (const stage of TASK_STAGES) {
     assert.equal(TASK_STAGE_STYLE[stage].label, stage);
     assert.ok(TASK_STAGE_STYLE[stage].cls.length > 0);
@@ -228,10 +228,10 @@ test("parseTaskStage enforces strict D38 [Stage] tokens without coercing malform
     rawPrefix: "Review",
     text: "Wait for a2",
   });
-  assert.deepEqual(parseTaskStage("[Result]"), {
-    stage: "Result",
+  assert.deepEqual(parseTaskStage("[Done]"), {
+    stage: "Done",
     kind: "valid",
-    rawPrefix: "Result",
+    rawPrefix: "Done",
     text: "",
   });
   assert.deepEqual(parseTaskStage("[Stage] Line 1\nLine 2"), {
@@ -241,11 +241,12 @@ test("parseTaskStage enforces strict D38 [Stage] tokens without coercing malform
     text: "Line 1\nLine 2",
   });
 
-  // Lowercase, padded, unknown, and empty brackets are flagged malformed (never coerced)
+  // Lowercase, padded, unknown, legacy, and empty brackets are flagged malformed (never coerced)
   for (const [raw, prefix] of [
     ["  [review]   Wait for a2  ", "review"],
     ["[ STAGE ] Draft case definition", " STAGE "],
     ["[WIP] draft", "WIP"],
+    ["[Result] legacy", "Result"],
     ["[] empty", ""],
   ] as const) {
     assert.deepEqual(parseTaskStage(raw), {
@@ -447,19 +448,19 @@ test("sortTasksByPriority, isTaskReadyNext, and isTaskInProgress separate ready-
   assert.equal(PRIORITY_STYLE.high.dotCls.includes("red"), true);
   assert.equal(PRIORITY_STYLE.normal.dotCls.includes("amber"), true);
   assert.equal(PRIORITY_STYLE.low.dotCls.includes("emerald"), true);
-  assert.equal(TASK_STAGE_META.Done.shortLabel, "Done (ready)");
-  assert.equal(TASK_STAGE_META.Result.shortLabel, "Result (delivered)");
+  assert.equal(TASK_STAGE_META.Review.shortLabel, "Review");
+  assert.equal(TASK_STAGE_META.Done.shortLabel, "Done");
 });
 
-test("groupTasksByStage places all 7 canonical stages and preserves malformed/unprefixed rows in unstaged", () => {
+test("groupTasksByStage places all 6 canonical stages and preserves malformed/unprefixed rows in unstaged", () => {
   const sample = [
     { id: "T1", next_action: "[Inbox] new" },
     { id: "T2", next_action: "[Assign] scoped" },
     { id: "T3", next_action: "[Stage] manifest" },
     { id: "T4", next_action: "[Run] active" },
     { id: "T5", next_action: "[Review] Line 1\nLine 2" },
-    { id: "T6", next_action: "[Done] pdf" },
-    { id: "T7", next_action: "[Result] shipped" },
+    { id: "T6", next_action: "[Done] shipped" },
+    { id: "T7", next_action: "[Result] legacy" },
     { id: "T8", next_action: "legacy plain action" },
     { id: "T9", next_action: "[review] lowercase" },
   ];
@@ -473,42 +474,38 @@ test("groupTasksByStage places all 7 canonical stages and preserves malformed/un
       ["Run", ["T4"]],
       ["Review", ["T5"]],
       ["Done", ["T6"]],
-      ["Result", ["T7"]],
     ],
   );
   assert.deepEqual(
     grouped.unstaged.map((x) => [x.task.id, x.parsed.kind, x.parsed.rawPrefix]),
     [
+      ["T7", "malformed", "Result"],
       ["T8", "unprefixed", null],
       ["T9", "malformed", "review"],
     ],
   );
 });
 
-test("summarizeTaskProgress counts canonical [Result] delivered and [Done] ready-to-deliver", () => {
+test("summarizeTaskProgress counts canonical [Done] completion only", () => {
   const sample = [
-    ...Array.from({ length: 19 }, (_, idx) => ({ next_action: `[Result] delivered ${idx + 1}` })),
-    { next_action: "[Done] ready to deliver" },
-    ...Array.from({ length: 54 }, (_, idx) => ({ next_action: `[Run] in progress ${idx + 1}` })),
+    ...Array.from({ length: 18 }, (_, idx) => ({ next_action: `[Done] completed ${idx + 1}` })),
+    { next_action: "[Review] awaiting review" },
+    ...Array.from({ length: 55 }, (_, idx) => ({ next_action: `[Run] in progress ${idx + 1}` })),
     { next_action: "plain legacy action" },
-    { next_action: "[result] lowercase should not count as delivered" },
+    { next_action: "[Result] legacy tag should not count as done" },
   ];
   assert.deepEqual(summarizeTaskProgress(sample), {
     total: 76,
-    delivered: 19,
-    readyToDeliver: 1,
-    remaining: 56,
-    deliveredPct: 25,
-    deliveredWidthPct: 25,
-    readyWidthPct: (1 / 76) * 100,
+    done: 18,
+    remaining: 58,
+    donePct: 24,
+    doneWidthPct: (18 / 76) * 100,
   });
   assert.deepEqual(summarizeTaskProgress([]), {
     total: 0,
-    delivered: 0,
-    readyToDeliver: 0,
+    done: 0,
     remaining: 0,
-    deliveredPct: 0,
-    deliveredWidthPct: 0,
-    readyWidthPct: 0,
+    donePct: 0,
+    doneWidthPct: 0,
   });
 });

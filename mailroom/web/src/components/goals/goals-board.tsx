@@ -77,6 +77,10 @@ export function DecisionBadge({ decision }: { decision?: number | boolean }) {
   );
 }
 
+export function shouldHideStateBadge(state: TaskState, stage: TaskStage | null): boolean {
+  return state === "done" && stage === "Done";
+}
+
 export function StageBadge({
   stage,
   parsed,
@@ -93,6 +97,7 @@ export function StageBadge({
         title={`${meta.label} — ${meta.description}`}
         className={TASK_STAGE_STYLE[stage].cls}
       >
+        {stage === "Done" && <CircleCheck data-icon="inline-start" aria-hidden="true" />}
         {meta.shortLabel}
       </Badge>
     );

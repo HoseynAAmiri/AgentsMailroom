@@ -255,7 +255,6 @@ export const TASK_STAGES = [
   "Run",
   "Review",
   "Done",
-  "Result",
 ] as const;
 
 export type TaskStage = (typeof TASK_STAGES)[number];
@@ -266,8 +265,7 @@ export const TASK_STAGE_STYLE: Record<TaskStage, { label: TaskStage; cls: string
   Stage: { label: "Stage", cls: "border-cyan-500/35 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300" },
   Run: { label: "Run", cls: "border-sky-500/40 bg-sky-500/15 text-sky-700 dark:text-sky-300" },
   Review: { label: "Review", cls: "border-violet-500/40 bg-violet-500/15 text-violet-700 dark:text-violet-300" },
-  Done: { label: "Done", cls: "border-teal-500/35 bg-teal-500/10 text-teal-700 dark:text-teal-300" },
-  Result: { label: "Result", cls: "border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" },
+  Done: { label: "Done", cls: "border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" },
 };
 
 export const TASK_STAGE_META: Record<TaskStage, { label: string; shortLabel: string; description: string }> = {
@@ -275,9 +273,8 @@ export const TASK_STAGE_META: Record<TaskStage, { label: string; shortLabel: str
   Assign: { label: "Assign", shortLabel: "Assign", description: "Needs owner & scope" },
   Stage: { label: "Stage", shortLabel: "Stage", description: "Prepared & preflight" },
   Run: { label: "Run", shortLabel: "Run", description: "Active execution" },
-  Review: { label: "Review", shortLabel: "Review", description: "Referee check" },
-  Done: { label: "Done · Ready to deliver", shortLabel: "Done (ready)", description: "Verified, ready to deliver" },
-  Result: { label: "Result · Delivered", shortLabel: "Result (delivered)", description: "Finished & delivered" },
+  Review: { label: "Review", shortLabel: "Review", description: "Review results & referee check" },
+  Done: { label: "Done", shortLabel: "Done", description: "Finished & delivered" },
 };
 
 const TASK_STAGE_SET = new Set<string>(TASK_STAGES);
@@ -521,7 +518,7 @@ export interface StagedTaskItem<T> {
   parsed: ParsedTaskStage;
 }
 
-/** Group tasks into the 7 canonical D38 stage columns while retaining unprefixed/malformed rows separately. */
+/** Group tasks into the 6 canonical D38 stage columns while retaining unprefixed/malformed rows separately. */
 export function groupTasksByStage<T extends { next_action?: string | null }>(
   tasks: readonly T[],
 ): {
@@ -592,32 +589,26 @@ export function gib(bytes?: number | null): string {
 
 export interface TaskProgressSummary {
   total: number;
-  delivered: number;
-  readyToDeliver: number;
+  done: number;
   remaining: number;
-  deliveredPct: number;
-  deliveredWidthPct: number;
-  readyWidthPct: number;
+  donePct: number;
+  doneWidthPct: number;
 }
 
-/** Summarize canonical [Result] delivered and [Done] ready-to-deliver progress on full scope. */
+/** Summarize canonical [Done] completion progress on full scope. */
 export function summarizeTaskProgress(tasks: readonly { next_action: string }[]): TaskProgressSummary {
   const total = tasks.length;
-  let delivered = 0;
-  let readyToDeliver = 0;
+  let done = 0;
   for (const task of tasks) {
     const { stage } = parseTaskStage(task.next_action);
-    if (stage === "Result") delivered += 1;
-    else if (stage === "Done") readyToDeliver += 1;
+    if (stage === "Done") done += 1;
   }
-  const remaining = Math.max(0, total - delivered - readyToDeliver);
+  const remaining = Math.max(0, total - done);
   return {
     total,
-    delivered,
-    readyToDeliver,
+    done,
     remaining,
-    deliveredPct: total ? Math.round((delivered / total) * 100) : 0,
-    deliveredWidthPct: total ? (delivered / total) * 100 : 0,
-    readyWidthPct: total ? (readyToDeliver / total) * 100 : 0,
+    donePct: total ? Math.round((done / total) * 100) : 0,
+    doneWidthPct: total ? (done / total) * 100 : 0,
   };
 }

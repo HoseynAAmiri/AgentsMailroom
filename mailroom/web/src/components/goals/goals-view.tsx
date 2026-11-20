@@ -20,7 +20,7 @@ import { api, fileHref } from "@/lib/api";
 import { GOAL_STATE_STYLE, PRIORITY_STYLE, TASK_STAGES, extractTaskDocLinks, isTaskInProgress, isTaskReadyNext, parseTaskStage, plainTaskTitle, sortTasksByPriority, summarizeTaskProgress, type TaskDocFolder, type TaskProgressSummary } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useMailroom } from "@/components/mailroom/context";
-import { DecisionBadge, GoalsBoard, PriorityFlagControl, StageBadge, StateBadge, titleParts, type GoalSummary as Goal, type GoalTask as Task, type TaskPriority } from "@/components/goals/goals-board";
+import { DecisionBadge, GoalsBoard, PriorityFlagControl, StageBadge, StateBadge, shouldHideStateBadge, titleParts, type GoalSummary as Goal, type GoalTask as Task, type TaskPriority } from "@/components/goals/goals-board";
 import { CopyFolderPathAction, OpenFolderAction, RepoFolderDialog } from "@/components/viewer/repo-folder-dialog";
 
 interface Tracker { goals: Goal[]; tasks: Task[]; order_revision: number; revision: number }
@@ -59,7 +59,7 @@ function TaskProgressBar({
   className?: string;
   dataAttr?: Record<string, string>;
 }) {
-  const tooltip = `${summary.delivered} of ${summary.total} delivered (${summary.deliveredPct}%)${summary.readyToDeliver > 0 ? `, ${summary.readyToDeliver} ready` : ""}`;
+  const tooltip = `${summary.done} of ${summary.total} done (${summary.donePct}%)`;
   return (
     <div {...dataAttr} className={cn("flex flex-wrap items-center gap-x-3 gap-y-1.5", className)}>
       <div
@@ -67,29 +67,23 @@ function TaskProgressBar({
         aria-label={label}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuenow={summary.deliveredPct}
+        aria-valuenow={summary.donePct}
         title={tooltip}
         className={cn(
           "relative flex flex-1 overflow-hidden rounded-full bg-muted",
           compact ? "h-1.5 min-w-24" : "h-2 min-w-36",
         )}
       >
-        {summary.deliveredWidthPct > 0 && (
+        {summary.doneWidthPct > 0 && (
           <div
             className="h-full bg-emerald-500 transition-all"
-            style={{ width: `${summary.deliveredWidthPct}%` }}
-          />
-        )}
-        {summary.readyWidthPct > 0 && (
-          <div
-            className="h-full bg-teal-400/85 transition-all dark:bg-teal-400/75"
-            style={{ width: `${summary.readyWidthPct}%` }}
+            style={{ width: `${summary.doneWidthPct}%` }}
           />
         )}
       </div>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground tabular-nums">
         <span className="font-medium text-emerald-700 dark:text-emerald-300">
-          {summary.delivered} of {summary.total} delivered
+          {summary.done} of {summary.total} done
         </span>
       </div>
     </div>
@@ -142,7 +136,7 @@ function TaskRowCard({
         >
           <Badge variant="ghost" className="px-0 font-mono text-muted-foreground">{task.id}</Badge>
           {showGoalBadge && <Badge variant="outline" className="font-mono text-[11px]">{task.goal_id}</Badge>}
-          <StateBadge task={task} />
+          {!shouldHideStateBadge(task.state, parsed.stage) && <StateBadge task={task} />}
           <DecisionBadge decision={task.decision} />
           <StageBadge stage={parsed.stage} parsed={parsed} />
           <Badge variant="outline" className="text-[11px]">{task.owner === "user" ? "USER" : task.owner || "Unassigned"}</Badge>
@@ -736,7 +730,7 @@ export function GoalsView() {
                               size="xs"
                               variant="outline"
                               data-open-goal-board={group.id}
-                              title={`Open ${group.id} 7-stage board`}
+                              title={`Open ${group.id} 6-stage board`}
                               className="h-8 gap-1 px-2 text-xs"
                               onClick={() => openGoalBoard(group.id)}
                             >
@@ -799,7 +793,7 @@ export function GoalsView() {
                     <Button size="icon" variant="ghost" className="-ml-2 size-10 touch:size-11 min-[900px]:hidden" aria-label="Back to goals" onClick={() => choose("")}><ArrowLeft /></Button>
                     {task ? <>
                       <Badge variant="outline" className="font-mono">{task.id}</Badge>
-                      <StateBadge task={task} />
+                      {!shouldHideStateBadge(task.state, parsedDetail?.stage ?? null) && <StateBadge task={task} />}
                       <DecisionBadge decision={task.decision} />
                       <StageBadge stage={parsedDetail?.stage ?? null} parsed={parsedDetail ?? undefined} />
                       <PriorityFlagControl
