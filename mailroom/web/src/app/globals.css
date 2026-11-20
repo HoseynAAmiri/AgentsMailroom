@@ -428,3 +428,11 @@ html[data-kb] .mailroom-shell {
 html {
   overscroll-behavior-y: auto;
 }
+
+/* A restored pane weight is flex-grow. Without a zero basis the list sizes
+   itself from its content and the other columns collapse on refresh. */
+[data-panel][style*="flex-grow"],
+[data-panel][style*="flex:"] {
+  flex-basis: 0px !important;
+  flex-shrink: 1 !important;
+}

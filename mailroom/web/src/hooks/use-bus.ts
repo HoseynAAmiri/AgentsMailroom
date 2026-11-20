@@ -117,7 +117,15 @@ export function useNow(intervalMs = 1000): number {
 }
 
 export function useLocalStorage<T>(key: string, initial: T): [T, (v: T | ((p: T) => T)) => void] {
-  const [value, setValue] = useState<T>(initial);
+  const [value, setValue] = useState<T>(() => {
+    if (typeof window === "undefined") return initial;
+    try {
+      const raw = localStorage.getItem(key);
+      return raw == null ? initial : (JSON.parse(raw) as T);
+    } catch {
+      return initial;
+    }
+  });
   useEffect(() => {
     try {
       const raw = localStorage.getItem(key);

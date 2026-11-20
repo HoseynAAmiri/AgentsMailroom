@@ -17,10 +17,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SearchableSelect, type SearchOption } from "@/components/ui/searchable-select";
 import { HoverTip } from "@/components/ui/tooltip";
 import { useBackLayer } from "@/hooks/use-back-layer";
+import { useLocalStorage } from "@/hooks/use-bus";
 import { api, fileHref } from "@/lib/api";
 import { GOAL_STATE_STYLE, PRIORITY_STYLE, TASK_STAGES, extractTaskDocLinks, isTaskInProgress, isTaskReadyNext, parseTaskStage, plainTaskTitle, resolveTaskFilesFolder, sortTasksByPriority, summarizeTaskProgress, type TaskDocFolder, type TaskProgressSummary } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useMailroom } from "@/components/mailroom/context";
+import { Bone, GoalsSkeleton } from "@/components/mailroom/page-skeletons";
 import { DecisionBadge, GoalsBoard, PriorityFlagControl, StageBadge, StateBadge, shouldHideStateBadge, titleParts, type GoalSummary as Goal, type GoalTask as Task, type TaskPriority } from "@/components/goals/goals-board";
 import { CopyFolderPathAction, OpenFolderAction, RepoFolderDialog } from "@/components/viewer/repo-folder-dialog";
 
@@ -34,6 +36,46 @@ interface Evidence {
 }
 type Edit = { kind: "goal" | "task"; id?: string; revision?: number; fields: Record<string, string | boolean> };
 type GoalsViewMode = "goals" | "decisions" | "ready" | "active" | "board";
+const GOALS_VIEW_MODES: GoalsViewMode[] = ["goals", "decisions", "ready", "active", "board"];
+interface GoalsPrefs {
+  viewMode: GoalsViewMode;
+  goalFilter: string;
+  boardGoal: string;
+  stateFilter: string;
+  stageFilter: string;
+  ownerFilter: string;
+  priorityFilter: string;
+  openIds: string[];
+  selectedId: string;
+}
+const DEFAULT_GOALS_PREFS: GoalsPrefs = {
+  viewMode: "goals",
+  goalFilter: "",
+  boardGoal: "",
+  stateFilter: "",
+  stageFilter: "",
+  ownerFilter: "",
+  priorityFilter: "",
+  openIds: [],
+  selectedId: "",
+};
+
+function normalizeGoalsPrefs(value: unknown): GoalsPrefs {
+  const raw = value && typeof value === "object" ? value as Partial<GoalsPrefs> : {};
+  const viewMode = GOALS_VIEW_MODES.includes(raw.viewMode as GoalsViewMode) ? raw.viewMode as GoalsViewMode : DEFAULT_GOALS_PREFS.viewMode;
+  return {
+    ...DEFAULT_GOALS_PREFS,
+    viewMode,
+    goalFilter: typeof raw.goalFilter === "string" ? raw.goalFilter : "",
+    boardGoal: typeof raw.boardGoal === "string" ? raw.boardGoal : "",
+    stateFilter: typeof raw.stateFilter === "string" ? raw.stateFilter : "",
+    stageFilter: typeof raw.stageFilter === "string" ? raw.stageFilter : "",
+    ownerFilter: typeof raw.ownerFilter === "string" ? raw.ownerFilter : "",
+    priorityFilter: typeof raw.priorityFilter === "string" ? raw.priorityFilter : "",
+    openIds: Array.isArray(raw.openIds) ? raw.openIds.filter((id): id is string => typeof id === "string") : [],
+    selectedId: typeof raw.selectedId === "string" ? raw.selectedId : "",
+  };
+}
 const textClass = "text-sm text-muted-foreground";
 const pageSize = 30;
 const stateOptions = Object.entries(GOAL_STATE_STYLE).map(([value, { label }]) => ({ value, label }));
@@ -245,14 +287,13 @@ export function GoalsView() {
   const admin = !!snap?.capabilities?.admin;
   const [data, setData] = useState<Tracker>();
   const [error, setError] = useState("");
-  const [goalFilter, setGoalFilter] = useState("");
-  const [boardGoal, setBoardGoal] = useState("");
-  const [stateFilter, setStateFilter] = useState("");
-  const [stageFilter, setStageFilter] = useState("");
-  const [ownerFilter, setOwnerFilter] = useState("");
-  const [priorityFilter, setPriorityFilter] = useState("");
-  const [viewMode, setViewMode] = useState<GoalsViewMode>("goals");
-  const [expandedGroups, setExpandedGroups] = useState<{ filter: string; ids: string[] }>();
+  const [storedPrefs, setStoredPrefs] = useLocalStorage<unknown>("mr-goals-view", null);
+  const prefs = normalizeGoalsPrefs(storedPrefs);
+  const { viewMode, goalFilter, boardGoal, stateFilter, stageFilter, ownerFilter, priorityFilter, openIds } = prefs;
+  const setPrefs = useCallback((partial: Partial<GoalsPrefs>) => {
+    setStoredPrefs((prev: unknown) => normalizeGoalsPrefs({ ...normalizeGoalsPrefs(prev), ...partial }));
+  }, [setStoredPrefs]);
+  const selectionReady = useRef(false);
   const [browseFolder, setBrowseFolder] = useState<TaskDocFolder | null>(null);
   const [evidence, setEvidence] = useState<Evidence>();
   const [detailError, setDetailError] = useState("");
@@ -372,6 +413,24 @@ export function GoalsView() {
     if (selected) detailRef.current?.scrollTo(0, 0);
   }, [selected]);
 
+  useEffect(() => {
+    if (!selectionReady.current) {
+      selectionReady.current = true;
+      if (selected) {
+        setPrefs({ selectedId: selected });
+        return;
+      }
+      try {
+        const saved = normalizeGoalsPrefs(JSON.parse(localStorage.getItem("mr-goals-view") || "null"));
+        if (saved.selectedId) setSelected(saved.selectedId);
+      } catch {
+        /* keep the current task closed */
+      }
+      return;
+    }
+    setPrefs({ selectedId: selected });
+  }, [selected, setPrefs, setSelected]);
+
   function choose(id: string) {
     setSelected(id); setPage(0); setTab(id === "untagged" ? "discussion" : "overview"); setEvidence(undefined); setDetailError("");
     setPath(""); setTagId(""); setTagTarget("");
@@ -403,22 +462,52 @@ export function GoalsView() {
   }
 
   function enterAcrossView(mode: "goals" | "decisions" | "ready" | "active") {
-    setGoalFilter("");
-    setViewMode(mode);
+    setPrefs({ goalFilter: "", viewMode: mode });
   }
 
   function openGoalBoard(goalId: string) {
-    setBoardGoal(goalId);
-    setViewMode("board");
+    setPrefs({ boardGoal: goalId, viewMode: "board", openIds: openIds.includes(goalId) ? openIds : [...openIds, goalId] });
   }
 
   function clearViewFilters() {
-    if (viewMode === "board") setBoardGoal("");
-    else setGoalFilter("");
-    setStateFilter("");
-    setStageFilter("");
-    setOwnerFilter("");
-    setPriorityFilter("");
+    setPrefs({
+      stateFilter: "",
+      stageFilter: "",
+      ownerFilter: "",
+      priorityFilter: "",
+      ...(viewMode === "board" ? { boardGoal: "" } : { goalFilter: "" }),
+    });
+  }
+
+  function setViewMode(mode: GoalsViewMode) {
+    setPrefs({ viewMode: mode });
+  }
+
+  function setGoalFilter(value: string) {
+    setPrefs({
+      goalFilter: value,
+      openIds: value && !openIds.includes(value) ? [...openIds, value] : openIds,
+    });
+  }
+
+  function setBoardGoal(value: string) {
+    setPrefs({ boardGoal: value });
+  }
+
+  function setStateFilter(value: string) {
+    setPrefs({ stateFilter: value });
+  }
+
+  function setStageFilter(value: string) {
+    setPrefs({ stageFilter: value });
+  }
+
+  function setOwnerFilter(value: string) {
+    setPrefs({ ownerFilter: value });
+  }
+
+  function setPriorityFilter(value: string) {
+    setPrefs({ priorityFilter: value });
   }
 
   function openEditor(kind: Edit["kind"], value?: Goal | Task) {
@@ -468,13 +557,10 @@ export function GoalsView() {
   const groups = data?.goals.filter((row) => !goalFilter || goalFilter === row.id) ?? [];
   const detailOpen = !!selected;
   const secondaryModalOpen = !!edit || !!remove || !!browseFolder || !!viewing;
-  const anyFilter = !!(goalFilter || stateFilter || stageFilter || ownerFilter || priorityFilter || search.trim());
-  const groupFilter = JSON.stringify([goalFilter, stateFilter, stageFilter, ownerFilter, priorityFilter, search.trim()]);
   const visibleGroupIds = groups
     .filter((group) => rows.some((row) => row.goal_id === group.id) || goalFilter === group.id)
     .map((group) => group.id);
-  const defaultOpenGroups = goalFilter ? [goalFilter] : anyFilter ? visibleGroupIds : visibleGroupIds.slice(0, 1);
-  const openGroups = expandedGroups?.filter === groupFilter ? expandedGroups.ids : defaultOpenGroups;
+  const openGroups = openIds.filter((id) => visibleGroupIds.includes(id));
   const detail = task ? titleParts(task.title) : { heading: selected === "untagged" ? "Untagged" : "Task unavailable", rest: "" };
   const parsedDetail = task ? parseTaskStage(task.next_action) : null;
   const detailDocLinks = task ? extractTaskDocLinks([...(task.links ?? []), ...(evidence?.files ?? [])], task.id) : null;
@@ -695,7 +781,10 @@ export function GoalsView() {
                       <Accordion
                         multiple
                         value={openGroups}
-                        onValueChange={(ids) => setExpandedGroups({ filter: groupFilter, ids })}
+                        onValueChange={(ids) => {
+                          const hidden = openIds.filter((id) => !visibleGroupIds.includes(id));
+                          setPrefs({ openIds: [...hidden, ...ids] });
+                        }}
                         aria-label="Tasks by goal"
                         className="space-y-2.5"
                       >
@@ -784,7 +873,7 @@ export function GoalsView() {
             </div>
           </div>
         </div>
-      ) : !error && <p className="p-4 text-sm text-muted-foreground">Loading goals…</p>}
+      ) : !error && <GoalsSkeleton />}
       <Dialog
         open={detailOpen && !!data}
         onOpenChange={(open) => {
@@ -888,10 +977,14 @@ export function GoalsView() {
                     </form>
                   </CardContent>
                 </Card>}
-                {!evidence?.events.length && <Card size="sm">
-                  <CardContent className={textClass}>{evidence
-                    ? task ? `No messages tagged ${task.id} yet. New message fills in the task ID for you.` : "No recent untagged messages."
-                    : "Loading discussion…"}</CardContent>
+                {!evidence ? (
+                  <div className="space-y-2" aria-busy="true" aria-label="Loading discussion">
+                    <Bone className="h-3 w-full" />
+                    <Bone className="h-3 w-11/12" />
+                    <Bone className="h-3 w-2/3" />
+                  </div>
+                ) : !evidence.events.length && <Card size="sm">
+                  <CardContent className={textClass}>{task ? `No messages tagged ${task.id} yet. New message fills in the task ID for you.` : "No recent untagged messages."}</CardContent>
                 </Card>}
                 <ul className="space-y-2">
                   {evidence?.events.map((row) => <li key={row.id}>
@@ -971,10 +1064,14 @@ export function GoalsView() {
                   <p className={textClass}>Choose the task, then select Link beside a document.</p>
                   <SearchableSelect label="Task for untagged documents" value={linkTarget} onChange={setLinkTarget} options={withChoice("Choose a task", taskOptions)} />
                 </>}
-                {!evidence?.files.length && <Card size="sm">
-                  <CardContent className={textClass}>{evidence
-                    ? task ? `No documents linked to ${task.id} yet. File attachments on tagged messages also appear here.` : "No recent untagged documents."
-                    : "Loading documents…"}</CardContent>
+                {!evidence ? (
+                  <div className="space-y-2" aria-busy="true" aria-label="Loading documents">
+                    <Bone className="h-3 w-full" />
+                    <Bone className="h-3 w-4/5" />
+                    <Bone className="h-3 w-1/2" />
+                  </div>
+                ) : !evidence.files.length && <Card size="sm">
+                  <CardContent className={textClass}>{task ? `No documents linked to ${task.id} yet. File attachments on tagged messages also appear here.` : "No recent untagged documents."}</CardContent>
                 </Card>}
                 {!!evidence?.files.length && (
                   <ul className="space-y-2">

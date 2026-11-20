@@ -31,20 +31,22 @@ export function AgentAvatar({ id, size = "md", agent, showState }: { id: string;
   const dim = size === "sm" ? "size-6 text-[10px]" : size === "lg" ? "size-10 text-sm" : "size-8 text-xs";
   const st = showState && agent ? effectiveState(agent, lastActivity.get(agent.id), activityNow) : null;
   return (
-    <span className="relative inline-flex shrink-0">
+    <span className={cn("relative inline-flex shrink-0 overflow-visible", dim)}>
       <span
-        className={cn("inline-flex items-center justify-center rounded-full font-semibold text-white", dim, defaultAvatarClass(id))}
+        className={cn("inline-flex size-full items-center justify-center rounded-full font-semibold text-white", defaultAvatarClass(id))}
         style={{ backgroundColor: avatarColorValue(avatarColorId(id, avatarColors?.[id])) }}
       >
         {id === "user" ? <User className="size-[55%]" /> : initials(id)}
       </span>
       {st && (
-        <span className={cn(
-          "absolute rounded-full ring-background",
-          size === "sm" ? "right-[3.5%] bottom-[3.5%] size-[28%]" : "right-[5%] bottom-[5%] size-1/4",
-          size === "sm" ? "ring-1" : size === "md" ? "ring-[1.5px]" : "ring-2",
-          STATE_DOT[st] ?? STATE_DOT.inactive,
-        )} />
+        <span
+          className={cn(
+            "absolute rounded-full ring-background",
+            size === "sm" ? "size-[28%] ring-1" : size === "lg" ? "size-1/4 ring-2" : "size-1/4 ring-[1.5px]",
+            STATE_DOT[st] ?? STATE_DOT.inactive,
+          )}
+          style={{ left: "85.355%", top: "85.355%", transform: "translate(-50%, -50%)" }}
+        />
       )}
     </span>
   );

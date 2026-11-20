@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SearchableSelect, type SearchOption } from "@/components/ui/searchable-select";
 import { Tip } from "@/components/mailroom/bits";
+import { FilesSkeleton } from "@/components/mailroom/page-skeletons";
 import { useMailroom } from "@/components/mailroom/context";
 
 type Kind = "image" | "pdf" | "data";
@@ -106,7 +107,7 @@ export function FilesView() {
       <div className="flex items-center gap-2 border-b px-3 py-2.5 sm:px-4">
         <h2 className="text-base font-semibold">Attachments</h2>
         <span className="hidden text-sm text-muted-foreground sm:inline">coordination/attachments · {list.length} files</span>
-        {loading && <span role="status" className="ml-auto text-xs text-muted-foreground">Loading…</span>}
+        {loading && files.length > 0 && <span role="status" className="ml-auto text-xs text-muted-foreground">Refreshing…</span>}
       </div>
       <div className="flex flex-wrap items-center gap-1.5 border-b px-3 py-2 sm:px-4">
         <div className="flex flex-wrap items-center gap-1">
@@ -135,6 +136,7 @@ export function FilesView() {
         </div>
       </div>
       <ScrollArea className="min-h-0 flex-1">
+        {loading && files.length === 0 ? <FilesSkeleton /> : <>
         <div className="divide-y">
           {list.slice(0, limit).map((f) => {
             const Icon = icon(f.name);
@@ -194,6 +196,7 @@ export function FilesView() {
             </Button>
           </div>
         )}
+        </>}
       </ScrollArea>
       <Dialog open={!!linkPath} onOpenChange={(open) => { if (!open && !linkBusy) setLinkPath(""); }}>
         <DialogContent>

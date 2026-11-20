@@ -259,6 +259,7 @@ export function ReadingPane() {
         <Button variant="ghost" size="icon-sm" aria-label="Back to list" className="md:hidden" onClick={() => select(null)}>
           <ArrowLeft />
         </Button>
+        <div className="ml-auto flex items-center gap-0.5">
         <IconAction label="Reply" icon={Reply} onClick={() => startCompose("reply", last)} />
         <IconAction label="Reply all" icon={ReplyAll} onClick={() => startCompose("replyAll", last)} />
         <IconAction label="Forward" icon={Forward} onClick={() => startCompose("forward", last)} />
@@ -274,7 +275,7 @@ export function ReadingPane() {
         )}
         <IconAction label={flagged ? "Unflag" : "Flag"} icon={Flag} onClick={() => mark(flagged ? "unflag" : "flag", flagged ? ids : [last.id])} className={cn(flagged && "fill-red-500 text-red-500")} />
         <DropdownMenu>
-          <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="More" className="ml-auto" />}>
+          <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="More" />}>
             <MoreHorizontal />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">
@@ -293,6 +294,7 @@ export function ReadingPane() {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        </div>
       </div>
       <ScrollArea className="min-h-0 flex-1">
         <div className="mx-auto max-w-4xl space-y-3 p-3 sm:p-5">

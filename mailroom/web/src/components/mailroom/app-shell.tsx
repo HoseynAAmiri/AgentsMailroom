@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useDefaultLayout } from "react-resizable-panels";
 import { AlertTriangle, FolderOpen, ListTodo, Mail, Monitor, Moon, PenSquare, RefreshCw, Search, Sun, Users, X } from "lucide-react";
 import { useTheme } from "next-themes";
 import { applyThemeMeta } from "@/lib/theme";
@@ -27,6 +28,31 @@ import { ReadingPane } from "./reading-pane";
 import { StatusFeed } from "./status-feed";
 import { ThreadList } from "./thread-list";
 import { Tip } from "./bits";
+import { PageSkeleton } from "./page-skeletons";
+
+function applyPaneLayout(groupId: string, layout: Record<string, number> | undefined) {
+  if (!layout) return;
+  const root = document.getElementById(groupId);
+  if (!root) return;
+  for (const [id, value] of Object.entries(layout)) {
+    if (typeof value !== "number" || !Number.isFinite(value)) continue;
+    const panel = document.getElementById(id);
+    if (!panel || !root.contains(panel)) continue;
+    panel.style.flexGrow = String(value);
+    panel.style.flexShrink = "1";
+    panel.style.flexBasis = "0px";
+  }
+}
+
+const paneStorage = {
+  getItem(key: string) {
+    if (typeof window === "undefined") return null;
+    try { return window.localStorage.getItem(key); } catch { return null; }
+  },
+  setItem(key: string, value: string) {
+    try { window.localStorage.setItem(key, value); } catch { /* private mode */ }
+  },
+};
 
 const GoalsView = dynamic(() => import("@/components/goals/goals-view").then((module) => module.GoalsView));
 const GB_PER_GIB = 2 ** 30 / 1e9;
@@ -277,17 +303,25 @@ function FolderDrawer() {
 /** Tablets: conversation list and reading pane side by side; folders in the drawer. */
 function TabletMailView() {
   const { folder } = useMailroom();
+  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
+    id: "mailroom-panes-tablet",
+    panelIds: ["list", "reading"],
+    storage: paneStorage,
+  });
+  useLayoutEffect(() => {
+    applyPaneLayout("mailroom-panes-tablet", defaultLayout as Record<string, number> | undefined);
+  }, [defaultLayout, folder]);
   return (
     <>
       {folder === "status" ? (
         <StatusFeed />
       ) : (
-        <ResizablePanelGroup orientation="horizontal" id="mailroom-panes-tablet">
-          <ResizablePanel id="list" defaultSize="42" minSize="280px">
+        <ResizablePanelGroup orientation="horizontal" id="mailroom-panes-tablet" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
+          <ResizablePanel id="list" defaultSize="42%" minSize="280px">
             <ThreadList />
           </ResizablePanel>
           <ResizableHandle withHandle />
-          <ResizablePanel id="reading" defaultSize="58" minSize="340px">
+          <ResizablePanel id="reading" defaultSize="58%" minSize="340px">
             <ReadingPane />
           </ResizablePanel>
         </ResizablePanelGroup>
@@ -297,29 +331,34 @@ function TabletMailView() {
   );
 }
 
-function MailView() {
+function DesktopMailView() {
   const { folder } = useMailroom();
-  const mobile = useIsMobile();
-  const tablet = useIsTablet();
-  if (mobile) return <MobileMailView />;
-  if (tablet) return <TabletMailView />;
+  const panelIds = folder === "status" ? ["folders", "status"] : ["folders", "list", "reading"];
+  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
+    id: "mailroom-panes",
+    panelIds,
+    storage: paneStorage,
+  });
+  useLayoutEffect(() => {
+    applyPaneLayout("mailroom-panes", defaultLayout as Record<string, number> | undefined);
+  }, [defaultLayout, folder]);
   return (
-    <ResizablePanelGroup orientation="horizontal" id="mailroom-panes">
-      <ResizablePanel id="folders" defaultSize="17" minSize="180px" maxSize="28">
+    <ResizablePanelGroup orientation="horizontal" id="mailroom-panes" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
+      <ResizablePanel id="folders" defaultSize="17%" minSize="180px" maxSize="28%">
         <FolderPane />
       </ResizablePanel>
       <ResizableHandle />
       {folder === "status" ? (
-        <ResizablePanel id="status" defaultSize="83">
+        <ResizablePanel id="status" defaultSize="83%">
           <StatusFeed />
         </ResizablePanel>
       ) : (
         <>
-          <ResizablePanel id="list" defaultSize="30" minSize="280px">
+          <ResizablePanel id="list" defaultSize="30%" minSize="280px">
             <ThreadList />
           </ResizablePanel>
           <ResizableHandle />
-          <ResizablePanel id="reading" defaultSize="53" minSize="360px">
+          <ResizablePanel id="reading" defaultSize="53%" minSize="360px">
             <ReadingPane />
           </ResizablePanel>
         </>
@@ -328,8 +367,18 @@ function MailView() {
   );
 }
 
+function MailView() {
+  const mobile = useIsMobile();
+  const tablet = useIsTablet();
+  if (mobile) return <MobileMailView />;
+  if (tablet) return <TabletMailView />;
+  return <DesktopMailView />;
+}
+
 function Shell() {
-  const { view, startCompose } = useMailroom();
+  const { view, startCompose, snap, error } = useMailroom();
+  const [booted, setBooted] = useState(false);
+  useEffect(() => { setBooted(true); }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
@@ -345,17 +394,23 @@ function Shell() {
   }, [startCompose]);
   useKeyboardViewport();
 
+  const waiting = !booted || (!snap && !error);
+
   return (
     <div className="mailroom-shell relative flex h-dvh flex-col">
       <TopBar />
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <Rail />
         <main className="min-h-0 min-w-0 flex-1">
-          {view === "mail" && <MailView />}
-          {view === "goals" && <GoalsView />}
-          {view === "team" && <TeamView />}
-          {view === "machine" && <MachineView />}
-          {view === "files" && <FilesView />}
+          {waiting ? <PageSkeleton view={view} /> : (
+            <>
+              {view === "mail" && <MailView />}
+              {view === "goals" && <GoalsView />}
+              {view === "team" && <TeamView />}
+              {view === "machine" && <MachineView />}
+              {view === "files" && <FilesView />}
+            </>
+          )}
         </main>
       </div>
       <SummonDialog />

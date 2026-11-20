@@ -166,7 +166,7 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
   const [folder, setFolderRaw] = useLocalStorage<FolderId>("mr-folder", "all");
   const [selected, setSelected] = useState<string | null>(null);
   const [focusEvent, setFocusEvent] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useLocalStorage("mr-search", "");
   const [taskFilter, setTaskFilter] = useLocalStorage("mr-tracker-task-filter", "all");
   const [goalTaskId, setGoalTaskId] = useState("");
   const [draft, setCompose] = useLocalStorage<ComposeDraft | null>("mr-draft", null);
