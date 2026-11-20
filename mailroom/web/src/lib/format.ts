@@ -210,10 +210,22 @@ export const GOAL_STATE_STYLE: Record<MailTask["state"], { label: string; cls: s
 
 export const PRIORITY_RANK = { high: 0, normal: 1, low: 2 } as const;
 
-export const PRIORITY_STYLE: Record<"high" | "normal" | "low", { label: string; cls: string }> = {
-  high: { label: "High", cls: "border-rose-500/40 bg-rose-500/15 text-rose-700 dark:text-rose-300" },
-  normal: { label: "Normal", cls: "border-border bg-muted/60 text-muted-foreground" },
-  low: { label: "Low", cls: "border-slate-400/35 bg-slate-500/10 text-slate-600 dark:text-slate-400" },
+export const PRIORITY_STYLE: Record<"high" | "normal" | "low", { label: string; cls: string; dotCls: string }> = {
+  high: {
+    label: "High",
+    cls: "border-red-500/45 bg-red-500/15 text-red-700 dark:text-red-300",
+    dotCls: "text-red-600 dark:text-red-400",
+  },
+  normal: {
+    label: "Normal",
+    cls: "border-amber-500/45 bg-amber-500/15 text-amber-800 dark:text-amber-300",
+    dotCls: "text-amber-600 dark:text-amber-400",
+  },
+  low: {
+    label: "Low",
+    cls: "border-emerald-500/45 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+    dotCls: "text-emerald-600 dark:text-emerald-400",
+  },
 };
 
 export function priorityRank(priority?: string | null): number {
@@ -256,6 +268,16 @@ export const TASK_STAGE_STYLE: Record<TaskStage, { label: TaskStage; cls: string
   Review: { label: "Review", cls: "border-violet-500/40 bg-violet-500/15 text-violet-700 dark:text-violet-300" },
   Done: { label: "Done", cls: "border-teal-500/35 bg-teal-500/10 text-teal-700 dark:text-teal-300" },
   Result: { label: "Result", cls: "border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" },
+};
+
+export const TASK_STAGE_META: Record<TaskStage, { label: string; shortLabel: string; description: string }> = {
+  Inbox: { label: "Inbox", shortLabel: "Inbox", description: "New / untriaged" },
+  Assign: { label: "Assign", shortLabel: "Assign", description: "Needs owner & scope" },
+  Stage: { label: "Stage", shortLabel: "Stage", description: "Prepared & preflight" },
+  Run: { label: "Run", shortLabel: "Run", description: "Active execution" },
+  Review: { label: "Review", shortLabel: "Review", description: "Referee check" },
+  Done: { label: "Done · Ready to deliver", shortLabel: "Done (ready)", description: "Verified, ready to deliver" },
+  Result: { label: "Result · Delivered", shortLabel: "Result (delivered)", description: "Finished & delivered" },
 };
 
 const TASK_STAGE_SET = new Set<string>(TASK_STAGES);

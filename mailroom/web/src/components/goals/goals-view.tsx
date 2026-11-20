@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Activity, ArrowDown, ArrowLeft, ArrowUp, ArrowUpToLine, ChevronRight, CircleCheck, Columns3, FileText, Link2, ListChecks, ListFilter, MessageSquare, MoreHorizontal, Plus, Tag, Target, TriangleAlert, Upload, X } from "lucide-react";
+import { Activity, ArrowDown, ArrowLeft, ArrowUp, ArrowUpToLine, ChevronRight, CircleCheck, Columns3, FileText, Flag, Link2, ListChecks, ListFilter, MessageSquare, MoreHorizontal, Plus, Tag, Target, TriangleAlert, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,10 +18,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SearchableSelect, type SearchOption } from "@/components/ui/searchable-select";
 import { useBackLayer } from "@/hooks/use-back-layer";
 import { api, fileHref } from "@/lib/api";
-import { GOAL_STATE_STYLE, TASK_STAGES, extractTaskDocLinks, isTaskInProgress, isTaskReadyNext, parseTaskStage, plainTaskTitle, sortTasksByPriority, type TaskDocFolder } from "@/lib/format";
+import { GOAL_STATE_STYLE, PRIORITY_STYLE, TASK_STAGES, extractTaskDocLinks, isTaskInProgress, isTaskReadyNext, parseTaskStage, plainTaskTitle, sortTasksByPriority, type TaskDocFolder } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useMailroom } from "@/components/mailroom/context";
-import { DecisionBadge, GoalsBoard, PriorityBadge, StageBadge, StateBadge, TaskDocFooter, titleParts, type GoalSummary as Goal, type GoalTask as Task } from "@/components/goals/goals-board";
+import { DecisionBadge, GoalsBoard, PriorityFlagControl, StageBadge, StateBadge, titleParts, type GoalSummary as Goal, type GoalTask as Task, type TaskPriority } from "@/components/goals/goals-board";
 import { OpenFolderAction, RepoFolderDialog } from "@/components/viewer/repo-folder-dialog";
 
 interface Tracker { goals: Goal[]; tasks: Task[]; order_revision: number; revision: number }
@@ -51,9 +51,9 @@ interface TaskRowCardProps {
   selected: boolean;
   showGoalBadge?: boolean;
   admin: boolean;
+  busy?: boolean;
   onSelect: (id: string) => void;
-  onOpenFile: (file: { href: string; path: string }) => void;
-  onOpenFolder: (folder: TaskDocFolder) => void;
+  onChangePriority?: (taskId: string, priority: TaskPriority) => void;
 }
 
 function TaskRowCard({
@@ -61,9 +61,9 @@ function TaskRowCard({
   selected,
   showGoalBadge = false,
   admin,
+  busy = false,
   onSelect,
-  onOpenFile,
-  onOpenFolder,
+  onChangePriority,
 }: TaskRowCardProps) {
   const parsed = parseTaskStage(task.next_action);
   const summaryText =
@@ -77,28 +77,40 @@ function TaskRowCard({
       size="sm"
       data-goal-row={task.id}
       className={cn(
-        "gap-0 py-0 shadow-none transition-colors",
-        task.state === "done" && !selected && "bg-muted/35 ring-foreground/5",
+        "gap-0 border border-border/80 py-0 ring-0 shadow-none transition-colors",
+        task.state === "done" && !selected && "border-border/50 bg-muted/35",
         task.state === "blocked" && "border-l-2 border-l-amber-500",
-        selected && "bg-primary/8 ring-primary/50",
+        selected && "border-primary/70 bg-primary/8",
       )}
     >
+      <div className="flex items-start justify-between gap-2 px-3 pt-2.5 pb-1">
+        <button
+          type="button"
+          onClick={() => onSelect(task.id)}
+          aria-current={selected ? "true" : undefined}
+          className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Badge variant="ghost" className="px-0 font-mono text-muted-foreground">{task.id}</Badge>
+          {showGoalBadge && <Badge variant="outline" className="font-mono text-[11px]">{task.goal_id}</Badge>}
+          <StateBadge task={task} />
+          <DecisionBadge decision={task.decision} />
+          <StageBadge stage={parsed.stage} parsed={parsed} />
+          <Badge variant="outline" className="text-[11px]">{task.owner === "user" ? "USER" : task.owner || "Unassigned"}</Badge>
+        </button>
+        <PriorityFlagControl
+          task={task}
+          admin={admin}
+          disabled={busy}
+          onChangePriority={onChangePriority}
+        />
+      </div>
       <button
         type="button"
         onClick={() => onSelect(task.id)}
         aria-current={selected ? "true" : undefined}
-        className="flex h-auto min-h-14 w-full min-w-0 items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring touch:py-3"
+        className="flex h-auto min-h-9 w-full min-w-0 items-center justify-between gap-3 rounded-b-xl px-3 pt-0.5 pb-2.5 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring touch:pb-3"
       >
         <span className="min-w-0 flex-1 space-y-1">
-          <span className="flex flex-wrap items-center gap-1.5">
-            <Badge variant="ghost" className="px-0 font-mono text-muted-foreground">{task.id}</Badge>
-            {showGoalBadge && <Badge variant="outline" className="font-mono text-[11px]">{task.goal_id}</Badge>}
-            <StateBadge task={task} />
-            <DecisionBadge decision={task.decision} />
-            <StageBadge stage={parsed.stage} parsed={parsed} />
-            <PriorityBadge priority={task.priority} />
-            <Badge variant="outline" className="text-[11px]">{task.owner === "user" ? "USER" : task.owner || "Unassigned"}</Badge>
-          </span>
           <span
             className={cn(
               "line-clamp-2 block text-sm leading-snug [overflow-wrap:anywhere]",
@@ -120,12 +132,6 @@ function TaskRowCard({
         </span>
         <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
       </button>
-      <TaskDocFooter
-        task={task}
-        admin={admin}
-        onOpenFile={onOpenFile}
-        onOpenFolder={onOpenFolder}
-      />
     </Card>
   );
 }
@@ -295,6 +301,16 @@ export function GoalsView() {
 
   function act(body: Record<string, unknown>, success?: string) {
     return mutate(body, success).catch((cause: Error) => { toast.error(cause.message); return undefined; });
+  }
+
+  function handleChangePriority(taskId: string, priority: TaskPriority) {
+    if (!admin || busy) return;
+    const target = data?.tasks.find((row) => row.id === taskId);
+    if (!target || (target.priority || "normal") === priority) return;
+    void act(
+      { action: "update", id: taskId, revision: target.revision, priority },
+      `Priority set to ${PRIORITY_STYLE[priority].label}`,
+    );
   }
 
   function enterAcrossView(mode: "goals" | "decisions" | "ready" | "active") {
@@ -490,6 +506,7 @@ export function GoalsView() {
                   {PRIORITY_FILTERS.map((opt) => {
                     const active = priorityFilter === opt.value;
                     const count = priorityCounts[opt.value];
+                    const flagStyle = opt.value ? PRIORITY_STYLE[opt.value] : null;
                     return (
                       <Button
                         key={opt.value || "all"}
@@ -501,6 +518,7 @@ export function GoalsView() {
                         className="h-7 gap-1 px-2 text-xs tabular-nums"
                         onClick={() => setPriorityFilter(opt.value)}
                       >
+                        {flagStyle && <Flag className={cn("size-3 shrink-0 fill-current", flagStyle.dotCls)} aria-hidden="true" />}
                         {opt.label}
                         <span className="text-muted-foreground">({count})</span>
                       </Button>
@@ -588,18 +606,27 @@ export function GoalsView() {
                         Showing <span className="font-mono font-medium text-foreground">{goal.id}</span> · {plainTaskTitle(goal.title)}
                       </p>
                     )}
+                    <p data-board-stage-summary="true" className="text-xs text-muted-foreground tabular-nums">
+                      <span className="font-medium text-emerald-700 dark:text-emerald-300">
+                        {boardRows.filter((row) => parseTaskStage(row.next_action).stage === "Result").length} finished &amp; delivered ([Result])
+                      </span>
+                      {" · "}
+                      <span className="font-medium text-teal-700 dark:text-teal-300">
+                        {boardRows.filter((row) => parseTaskStage(row.next_action).stage === "Done").length} ready to deliver ([Done])
+                      </span>
+                    </p>
                   </div>
                   {!boardRows.length && <Card size="sm" className="mb-3"><CardContent className={textClass}>No tasks match.</CardContent></Card>}
-                  <GoalsBoard tasks={boardRows} selectedId={selected} admin={admin} onSelect={choose} onOpenFile={openFile} onOpenFolder={setBrowseFolder} />
+                  <GoalsBoard tasks={boardRows} selectedId={selected} admin={admin} busy={busy} onSelect={choose} onChangePriority={handleChangePriority} />
                 </>
               ) : viewMode === "decisions" ? (
                 <div className="space-y-3" data-view-panel="decisions">
                   <p className={textClass}>Tasks waiting on a USER decision across all goals, sorted by priority.</p>
                   {decisionRows.length > 0 ? (
-                    <ul className="space-y-2">
+                    <ul className="space-y-2.5 p-0.5">
                       {decisionRows.map((row) => (
                         <li key={row.id}>
-                          <TaskRowCard task={row} selected={selected === row.id} showGoalBadge admin={admin} onSelect={choose} onOpenFile={openFile} onOpenFolder={setBrowseFolder} />
+                          <TaskRowCard task={row} selected={selected === row.id} showGoalBadge admin={admin} busy={busy} onSelect={choose} onChangePriority={handleChangePriority} />
                         </li>
                       ))}
                     </ul>
@@ -611,10 +638,10 @@ export function GoalsView() {
                 <div className="space-y-3" data-view-panel="ready">
                   <p className={textClass}>Tasks ready to start across all goals (to-do tasks not held on a USER decision), sorted by priority.</p>
                   {readyRows.length > 0 ? (
-                    <ul className="space-y-2">
+                    <ul className="space-y-2.5 p-0.5">
                       {readyRows.map((row) => (
                         <li key={row.id}>
-                          <TaskRowCard task={row} selected={selected === row.id} showGoalBadge admin={admin} onSelect={choose} onOpenFile={openFile} onOpenFolder={setBrowseFolder} />
+                          <TaskRowCard task={row} selected={selected === row.id} showGoalBadge admin={admin} busy={busy} onSelect={choose} onChangePriority={handleChangePriority} />
                         </li>
                       ))}
                     </ul>
@@ -626,10 +653,10 @@ export function GoalsView() {
                 <div className="space-y-3" data-view-panel="active">
                   <p className={textClass}>Active work in progress across all goals (in-progress tasks not held on a USER decision), sorted by priority.</p>
                   {activeRows.length > 0 ? (
-                    <ul className="space-y-2">
+                    <ul className="space-y-2.5 p-0.5">
                       {activeRows.map((row) => (
                         <li key={row.id}>
-                          <TaskRowCard task={row} selected={selected === row.id} showGoalBadge admin={admin} onSelect={choose} onOpenFile={openFile} onOpenFolder={setBrowseFolder} />
+                          <TaskRowCard task={row} selected={selected === row.id} showGoalBadge admin={admin} busy={busy} onSelect={choose} onChangePriority={handleChangePriority} />
                         </li>
                       ))}
                     </ul>
@@ -701,7 +728,7 @@ export function GoalsView() {
                       const doneCount = allInGoal.filter((row) => row.state === "done").length;
                       const blockedCount = allInGoal.filter((row) => row.state === "blocked").length;
                       return (
-                        <AccordionItem key={group.id} value={group.id} data-goal-section={group.id} className="rounded-xl bg-card ring-1 ring-foreground/10">
+                        <AccordionItem key={group.id} value={group.id} data-goal-section={group.id} className="rounded-xl border border-border/80 bg-card ring-0">
                           <div className="flex flex-wrap items-center gap-1 pr-2">
                             <AccordionTrigger className="min-w-0 flex-1">
                               <Badge variant="outline" className="font-mono">{group.id}</Badge>
@@ -739,22 +766,22 @@ export function GoalsView() {
                               </DropdownMenu>
                             )}
                           </div>
-                          <AccordionContent className="space-y-2.5">
+                          <AccordionContent className="space-y-2.5 px-3 pt-1 pb-3">
                             <Progress
                               value={allInGoal.length ? 100 * doneCount / allInGoal.length : 0}
                               aria-label={`${doneCount} of ${allInGoal.length} tasks done`}
                             />
                             {items.length > 0 ? (
-                              <ul className="space-y-2">
+                              <ul className="space-y-2.5 p-0.5">
                                 {items.map((row) => (
                                   <li key={row.id}>
                                     <TaskRowCard
                                       task={row}
                                       selected={selected === row.id}
                                       admin={admin}
+                                      busy={busy}
                                       onSelect={choose}
-                                      onOpenFile={openFile}
-                                      onOpenFolder={setBrowseFolder}
+                                      onChangePriority={handleChangePriority}
                                     />
                                   </li>
                                 ))}
@@ -783,7 +810,12 @@ export function GoalsView() {
                       <StateBadge task={task} />
                       <DecisionBadge decision={task.decision} />
                       <StageBadge stage={parsedDetail?.stage ?? null} parsed={parsedDetail ?? undefined} />
-                      <PriorityBadge priority={task.priority} />
+                      <PriorityFlagControl
+                        task={task}
+                        admin={admin}
+                        disabled={busy}
+                        onChangePriority={handleChangePriority}
+                      />
                       <Badge variant="outline">{task.owner === "user" ? "USER" : task.owner || "Unassigned"}</Badge>
                     </> : <Badge variant="secondary"><Tag /> Triage</Badge>}
                     <Button size="icon" variant="ghost" className="ml-auto hidden size-9 min-[900px]:inline-flex" aria-label="Close task details" title="Close details" onClick={() => choose("")}><X /></Button>
@@ -923,40 +955,9 @@ export function GoalsView() {
                       ? task ? `No documents linked to ${task.id} yet. File attachments on tagged messages also appear here.` : "No recent untagged documents."
                       : "Loading documents…"}</CardContent>
                   </Card>}
-                  {task && evidence?.files.length ? (() => {
-                    const ownedPrefixes = (detailDocLinks?.ownedFolders ?? []).map((f) => `${f.folder}/`);
-                    const folderFiles = evidence.files.filter((file) => ownedPrefixes.some((p) => file.startsWith(p)));
-                    const relatedFiles = evidence.files.filter((file) => !ownedPrefixes.some((p) => file.startsWith(p)));
-                    return (
-                      <div className="space-y-4">
-                        {folderFiles.length > 0 && (
-                          <section data-section="task-folder-documents" aria-label="Task folder documents" className="space-y-2">
-                            <div className="flex items-center gap-2">
-                              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Task folder documents</h3>
-                              <Badge variant="secondary" className="tabular-nums">{folderFiles.length}</Badge>
-                            </div>
-                            <ul className="space-y-2">
-                              {folderFiles.map((file) => renderDocFileItem(file, evidence.manual_files.includes(file)))}
-                            </ul>
-                          </section>
-                        )}
-                        {relatedFiles.length > 0 && (
-                          <section data-section="related-evidence" aria-label="Related evidence" className="space-y-2">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Related evidence</h3>
-                              <Badge variant="secondary" className="tabular-nums">{relatedFiles.length}</Badge>
-                              <span className="text-xs text-muted-foreground">Linked references and attachments outside this task&apos;s folder</span>
-                            </div>
-                            <ul className="space-y-2">
-                              {relatedFiles.map((file) => renderDocFileItem(file, evidence.manual_files.includes(file)))}
-                            </ul>
-                          </section>
-                        )}
-                      </div>
-                    );
-                  })() : (
+                  {!!evidence?.files.length && (
                     <ul className="space-y-2">
-                      {evidence?.files.map((file) => renderDocFileItem(file, !!task && evidence.manual_files.includes(file)))}
+                      {evidence.files.map((file) => renderDocFileItem(file, !!task && evidence.manual_files.includes(file)))}
                     </ul>
                   )}
                 </TabsContent>}

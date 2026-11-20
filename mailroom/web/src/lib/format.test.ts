@@ -7,7 +7,9 @@ const {
   ACTIVE_MIN,
   IDLE_MIN,
   MAX_FUTURE_SKEW_MS,
+  PRIORITY_STYLE,
   TASK_STAGES,
+  TASK_STAGE_META,
   TASK_STAGE_STYLE,
   buildLastActivityMap,
   effectiveState,
@@ -441,6 +443,11 @@ test("sortTasksByPriority, isTaskReadyNext, and isTaskInProgress separate ready-
     sample.filter(isTaskInProgress).map((t) => t.id),
     ["B"],
   );
+  assert.equal(PRIORITY_STYLE.high.dotCls.includes("red"), true);
+  assert.equal(PRIORITY_STYLE.normal.dotCls.includes("amber"), true);
+  assert.equal(PRIORITY_STYLE.low.dotCls.includes("emerald"), true);
+  assert.equal(TASK_STAGE_META.Done.shortLabel, "Done (ready)");
+  assert.equal(TASK_STAGE_META.Result.shortLabel, "Result (delivered)");
 });
 
 test("groupTasksByStage places all 7 canonical stages and preserves malformed/unprefixed rows in unstaged", () => {
