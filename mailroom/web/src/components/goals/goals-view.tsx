@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Activity, ArrowDown, ArrowLeft, ArrowUp, ArrowUpToLine, ChevronRight, CircleCheck, Columns3, FileText, Flag, FolderOpen, Link2, ListChecks, ListFilter, MessageSquare, MoreHorizontal, Plus, Tag, Target, TriangleAlert, Upload, X } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, ArrowUpToLine, ChevronRight, CircleCheck, Columns3, FileText, Flag, FolderOpen, Link2, ListChecks, ListFilter, MessageSquare, MoreHorizontal, Plus, Tag, Target, TriangleAlert, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -238,7 +238,7 @@ async function request<T>(url: string, body?: unknown): Promise<T> {
 }
 
 export function GoalsView() {
-  const { snap, agents, search, openEvent, openFile, startCompose, registerViewRefresh, goalTaskId: selected, setGoalTaskId: setSelected } = useMailroom();
+  const { snap, agents, search, viewing, openEvent, openFile, startCompose, registerViewRefresh, goalTaskId: selected, setGoalTaskId: setSelected } = useMailroom();
   const admin = !!snap?.capabilities?.admin;
   const [data, setData] = useState<Tracker>();
   const [error, setError] = useState("");
@@ -266,9 +266,7 @@ export function GoalsView() {
   const [tagTarget, setTagTarget] = useState("");
   const [linkTarget, setLinkTarget] = useState("");
   const uploadRef = useRef<HTMLInputElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
   const detailRef = useRef<HTMLDivElement>(null);
-  const listScroll = useRef(0);
   const lastId = snap?.last_id;
 
   const load = useCallback(async (signal?: AbortSignal) => {
@@ -370,11 +368,9 @@ export function GoalsView() {
 
   useEffect(() => {
     if (selected) detailRef.current?.scrollTo(0, 0);
-    else listRef.current?.scrollTo(0, listScroll.current);
   }, [selected]);
 
   function choose(id: string) {
-    if (!selected && id) listScroll.current = listRef.current?.scrollTop ?? 0;
     setSelected(id); setPage(0); setTab(id === "untagged" ? "discussion" : "overview"); setEvidence(undefined); setDetailError("");
     setPath(""); setTagId(""); setTagTarget("");
   }
@@ -469,6 +465,7 @@ export function GoalsView() {
   const orderAvailable = !goalFilter && !stateFilter && !stageFilter && !ownerFilter && !priorityFilter && !search.trim() && viewMode === "goals";
   const groups = data?.goals.filter((row) => !goalFilter || goalFilter === row.id) ?? [];
   const detailOpen = !!selected;
+  const secondaryModalOpen = !!edit || !!remove || !!browseFolder || !!viewing;
   const anyFilter = !!(goalFilter || stateFilter || stageFilter || ownerFilter || priorityFilter || search.trim());
   const groupFilter = JSON.stringify([goalFilter, stateFilter, stageFilter, ownerFilter, priorityFilter, search.trim()]);
   const visibleGroupIds = groups
@@ -523,13 +520,10 @@ export function GoalsView() {
       </header>
       {error && <div role="alert" className="shrink-0 border-b px-3 py-2 text-sm text-destructive">{error}</div>}
       {data ? (
-        <div className={cn("grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] overflow-hidden", detailOpen && "min-[900px]:grid-cols-[minmax(20rem,2fr)_minmax(0,3fr)]")}>
+        <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] overflow-hidden">
           <div
             data-goals-pane="true"
-            className={cn(
-              "flex h-full min-h-0 min-w-0 flex-col overflow-hidden",
-              detailOpen && "hidden min-[900px]:flex min-[900px]:border-r",
-            )}
+            className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
           >
             <div className="flex min-h-0 min-w-0 flex-1 flex-col px-3 pt-3 pb-2 sm:px-5">
               <div className="mx-auto w-full max-w-7xl shrink-0">
@@ -722,11 +716,10 @@ export function GoalsView() {
                     )}
                   </div>
                   {!boardRows.length && <Card size="sm" className="mx-auto mb-2 w-full max-w-7xl shrink-0"><CardContent className={textClass}>No tasks match.</CardContent></Card>}
-                  <GoalsBoard tasks={boardRows} selectedId={selected} admin={admin} busy={busy} constrained={detailOpen} onSelect={choose} onChangePriority={handleChangePriority} onOpenFiles={setBrowseFolder} />
+                  <GoalsBoard tasks={boardRows} selectedId={selected} admin={admin} busy={busy} onSelect={choose} onChangePriority={handleChangePriority} onOpenFiles={setBrowseFolder} />
                 </>
               ) : (
                 <div
-                  ref={listRef}
                   data-goals-list-scroll="true"
                   className="min-h-0 flex-1 overflow-y-auto pr-0.5 pb-2"
                 >
@@ -868,187 +861,205 @@ export function GoalsView() {
               )}
             </div>
           </div>
-          {detailOpen && <div ref={detailRef} className="h-full min-h-0 min-w-0 overflow-y-auto bg-muted/20 p-3 sm:p-5">
-            <div className="mx-auto max-w-3xl space-y-4">
-              <Card>
-                <CardHeader>
-                  <div className="mb-1 flex flex-wrap items-center gap-1.5">
-                    <Button size="icon" variant="ghost" className="-ml-2 size-10 touch:size-11 min-[900px]:hidden" aria-label="Back to goals" onClick={() => choose("")}><ArrowLeft /></Button>
-                    {task ? <>
-                      <Badge variant="outline" className="font-mono">{task.id}</Badge>
-                      {!shouldHideStateBadge(task.state, parsedDetail?.stage ?? null) && <StateBadge task={task} />}
-                      <DecisionBadge decision={task.decision} />
-                      <StageBadge stage={parsedDetail?.stage ?? null} parsed={parsedDetail ?? undefined} />
-                      <PriorityFlagControl
-                        task={task}
-                        admin={admin}
-                        disabled={busy}
-                        onChangePriority={handleChangePriority}
-                      />
-                      <Badge variant="outline">{task.owner === "user" ? "USER" : task.owner || "Unassigned"}</Badge>
-                    </> : <Badge variant="secondary"><Tag /> Triage</Badge>}
-                    <Button size="icon" variant="ghost" className="ml-auto hidden size-9 min-[900px]:inline-flex" aria-label="Close task details" title="Close details" onClick={() => choose("")}><X /></Button>
-                  </div>
-                  <CardTitle className="text-lg [overflow-wrap:anywhere] sm:text-xl">{detail.heading}</CardTitle>
-                </CardHeader>
-                {task && admin && <CardContent className="flex flex-wrap items-center gap-2">
-                  <Button size="sm" className="h-10 touch:h-11" title="Update the owner, state, priority, next action, blocker, notes, or decision flag" onClick={() => openEditor("task", task)}>Edit task</Button>
-                  {task.state !== "done" && !task.decision && <Button size="sm" variant="outline" className="h-10 touch:h-11" disabled={busy}
-                    onClick={() => void act({ action: "update", id: task.id, revision: task.revision, state: "done" }, "Task marked done")}><CircleCheck /> Mark done</Button>}
-                  <DropdownMenu>
-                    <DropdownMenuTrigger render={<Button size="icon" variant="outline" className="ml-auto size-10 touch:size-11" aria-label="Task actions"><MoreHorizontal /></Button>} />
-                    <DropdownMenuContent align="end" className="w-44">
-                      {([["up", ArrowUp], ["down", ArrowDown], ["top", ArrowUpToLine]] as const).map(([direction, Icon]) =>
-                        <DropdownMenuItem key={direction} disabled={busy || !orderAvailable} className="touch:min-h-11"
-                          onClick={() => void act({ action: "move", id: task.id, direction, order_revision: data.order_revision })}><Icon /> Move {direction}</DropdownMenuItem>)}
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem variant="destructive" className="touch:min-h-11" onClick={() => setRemove({ goal: task })}>Remove task</DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </CardContent>}
-              </Card>
-              <Tabs value={admin ? tab : "overview"} onValueChange={(value) => { setTab(String(value)); setPage(0); setTagId(""); }}>
-                {admin && (
-                  <TabsList aria-label="Task details" className="w-full justify-stretch sm:w-fit">
-                    {task && <TabsTrigger value="overview" className="min-h-10 flex-1 px-2 touch:min-h-11 sm:px-3">Overview</TabsTrigger>}
-                    <TabsTrigger value="discussion" className="min-h-10 flex-1 px-2 touch:min-h-11 sm:px-3"><MessageSquare className="hidden sm:block" /> Discussion</TabsTrigger>
-                    <TabsTrigger value="documents" className="min-h-10 flex-1 px-2 touch:min-h-11 sm:px-3"><FileText className="hidden sm:block" /> Documents</TabsTrigger>
-                  </TabsList>
-                )}
-                {task && <TabsContent value="overview" className="space-y-3">
-                  {[
-                    ["Next action", task.next_action],
-                    ["Blocker", task.blocker],
-                    ["Notes", task.notes],
-                    ["Context", detail.rest],
-                  ].map(([label, value]) => value && <Card key={label} size="sm">
-                    <CardHeader><CardTitle>{label}</CardTitle></CardHeader>
-                    <CardContent className="whitespace-pre-wrap [overflow-wrap:anywhere]">{value}</CardContent>
-                  </Card>)}
-                  {!task.next_action && !task.blocker && !task.notes && !detail.rest &&
-                    <Card size="sm"><CardContent className={textClass}>No next action or notes yet.</CardContent></Card>}
-                </TabsContent>}
-                {detailError && <p role="alert" className="text-sm text-destructive">{detailError}</p>}
-                {admin && <TabsContent value="discussion" className="space-y-3">
-                  {task && <div className="flex justify-end">
-                    <Button size="sm" variant="outline" className="h-10 touch:h-11" title={`Start mail with ${task.id} filled in as the task ID`}
-                      onClick={() => startCompose("new", null, { taskId: task.id })}>
-                      <Plus /> New message
-                    </Button>
-                  </div>}
-                  {selected === "untagged" && <p className={textClass}>Use the tag button beside a message to choose its task, then save the tag.</p>}
-                  {tagId && <Card size="sm">
-                    <CardHeader><CardTitle>Tag {tagId}</CardTitle></CardHeader>
-                    <CardContent>
-                      <form className="grid grid-cols-2 gap-2" onSubmit={(event) => {
-                        event.preventDefault();
-                        void act({ action: "tag", event_id: tagId, id: tagTarget || null }, "Message tag saved").then((result) => { if (result) setTagId(""); });
-                      }}>
-                        <SearchableSelect label="Task tag" className="col-span-2" value={tagTarget} onChange={setTagTarget} options={withChoice("Clear tag", taskOptions)} />
-                        <Button size="sm" className="h-10 touch:h-11" variant="outline" type="button" onClick={() => setTagId("")}>Cancel</Button>
-                        <Button type="submit" size="sm" className="h-10 touch:h-11" disabled={busy}>Save tag</Button>
-                      </form>
-                    </CardContent>
-                  </Card>}
-                  {!evidence?.events.length && <Card size="sm">
-                    <CardContent className={textClass}>{evidence
-                      ? task ? `No messages tagged ${task.id} yet. New message fills in the task ID for you.` : "No recent untagged messages."
-                      : "Loading discussion…"}</CardContent>
-                  </Card>}
-                  <ul className="space-y-2">
-                    {evidence?.events.map((row) => <li key={row.id}>
-                      <Card size="sm" className="flex-row items-center justify-between gap-2 p-2">
-                        <Button variant="ghost" className="h-auto min-h-11 min-w-0 flex-1 justify-start whitespace-normal"
-                          disabled={row.type === "agent.status"} onClick={() => openEvent(row.id)}>
-                          <span className="min-w-0 text-left">
-                            <span className="flex flex-wrap gap-1.5">
-                              <Badge variant="ghost" className="px-0 font-mono">{row.id}</Badge>
-                              <Badge variant="outline">{row.from === "user" ? "USER" : row.from}</Badge>
-                              {row.task_id && <Badge variant="outline">{row.task_id}</Badge>}
-                            </span>
-                            <span className="line-clamp-2 text-sm leading-snug [overflow-wrap:anywhere]">{row.subject ?? row.excerpt}</span>
-                          </span>
-                        </Button>
-                        {row.type !== "agent.status" && <Button size="icon" variant="ghost" className="size-10 shrink-0 touch:size-11"
-                          aria-label={`Tag message ${row.id}`} title="Set tag" onClick={() => { setTagId(row.id); setTagTarget(task?.id ?? ""); }}><Tag /></Button>}
-                      </Card>
-                    </li>)}
-                  </ul>
-                </TabsContent>}
-                {admin && <TabsContent value="documents" className="space-y-3">
-                  {task ? <Card size="sm">
-                    <CardContent className="space-y-3">
-                      <form className="flex flex-wrap gap-2" onSubmit={(event) => {
-                        event.preventDefault();
-                        void act({ action: "link", id: task.id, path }, "File linked").then((result) => { if (result) setPath(""); });
-                      }}>
-                        <Input className="h-11 min-w-0 flex-1 text-base sm:h-9 sm:text-sm" aria-label="Repository file path" placeholder="Repository file path"
-                          value={path} onChange={(event) => setPath(event.target.value)} />
-                        <Button type="submit" size="sm" className="h-11 sm:h-9" title="Link an existing file by its repository-relative path"
-                          disabled={busy || !path.trim()}><Link2 /> Link</Button>
-                      </form>
-                      <p className={textClass}>Link an existing repository file, or upload a copy to Mailroom attachments.</p>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Button size="sm" variant="outline" className="h-10 touch:h-11" disabled={busy} onClick={() => uploadRef.current?.click()}>
-                          <Upload /> Upload to task
-                        </Button>
-                        {detailDocLinks && (
-                          <>
-                            <OpenFolderAction
-                              admin={admin}
-                              folders={detailDocLinks.ownedFolders}
-                              onOpenFolder={setBrowseFolder}
-                              size="sm"
-                              label="Browse folder"
-                            />
-                            <CopyFolderPathAction
-                              admin={admin}
-                              folders={detailDocLinks.ownedFolders}
-                              size="sm"
-                            />
-                          </>
-                        )}
-                      </div>
-                      <Input type="file" ref={uploadRef} hidden disabled={busy} onChange={async (event) => {
-                        const file = event.target.files?.[0];
-                        event.target.value = "";
-                        if (!file) return;
-                        setBusy(true);
-                        try {
-                          const result = await api.uploadAttachment(file, file.name, task.id);
-                          if (result.link_warning || result.export_warning) toast.warning(result.link_warning || result.export_warning);
-                          else toast.success("File uploaded and linked");
-                          await load();
-                        } catch (cause) { toast.error(String(cause)); }
-                        finally { setBusy(false); }
-                      }} />
-                    </CardContent>
-                  </Card> : <>
-                    <p className={textClass}>Choose the task, then select Link beside a document.</p>
-                    <SearchableSelect label="Task for untagged documents" value={linkTarget} onChange={setLinkTarget} options={withChoice("Choose a task", taskOptions)} />
-                  </>}
-                  {!evidence?.files.length && <Card size="sm">
-                    <CardContent className={textClass}>{evidence
-                      ? task ? `No documents linked to ${task.id} yet. File attachments on tagged messages also appear here.` : "No recent untagged documents."
-                      : "Loading documents…"}</CardContent>
-                  </Card>}
-                  {!!evidence?.files.length && (
-                    <ul className="space-y-2">
-                      {evidence.files.map((file) => renderDocFileItem(file, !!task && evidence.manual_files.includes(file)))}
-                    </ul>
-                  )}
-                </TabsContent>}
-                {tab !== "overview" && (page > 0 || (page + 1) * pageSize < (tab === "discussion" ? evidence?.total ?? 0 : evidence?.file_total ?? 0)) && (
-                  <div className="flex justify-between">
-                    <Button size="sm" variant="outline" className="h-10 touch:h-11" disabled={!page} onClick={() => setPage(page - 1)}>Previous</Button>
-                    <Button size="sm" variant="outline" className="h-10 touch:h-11" disabled={(page + 1) * pageSize >= (tab === "discussion" ? evidence?.total ?? 0 : evidence?.file_total ?? 0)} onClick={() => setPage(page + 1)}>Next</Button>
-                  </div>
-                )}
-              </Tabs>
-            </div>
-          </div>}
         </div>
       ) : !error && <p className="p-4 text-sm text-muted-foreground">Loading goals…</p>}
+      <Dialog
+        open={detailOpen && !!data}
+        onOpenChange={(open) => {
+          if (!open && !secondaryModalOpen) choose("");
+        }}
+      >
+        <DialogContent
+          data-task-detail-modal="true"
+          className="flex max-h-[88dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl"
+        >
+          <div className="shrink-0 space-y-2.5 border-b bg-card/50 px-4 pt-4 pb-3 pr-11 sm:px-5">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {task ? (
+                <>
+                  <Badge variant="outline" className="font-mono">{task.id}</Badge>
+                  {!shouldHideStateBadge(task.state, parsedDetail?.stage ?? null) && <StateBadge task={task} />}
+                  <DecisionBadge decision={task.decision} />
+                  <StageBadge stage={parsedDetail?.stage ?? null} parsed={parsedDetail ?? undefined} />
+                  <PriorityFlagControl
+                    task={task}
+                    admin={admin}
+                    disabled={busy}
+                    onChangePriority={handleChangePriority}
+                  />
+                  <Badge variant="outline">{task.owner === "user" ? "USER" : task.owner || "Unassigned"}</Badge>
+                </>
+              ) : (
+                <Badge variant="secondary"><Tag /> Triage</Badge>
+              )}
+            </div>
+            <DialogTitle className="text-lg leading-snug font-semibold [overflow-wrap:anywhere] sm:text-xl">
+              {detail.heading}
+            </DialogTitle>
+            {task && admin && (
+              <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                <Button size="sm" className="h-9 touch:h-11" title="Update the owner, state, priority, next action, blocker, notes, or decision flag" onClick={() => openEditor("task", task)}>Edit task</Button>
+                {task.state !== "done" && !task.decision && (
+                  <Button size="sm" variant="outline" className="h-9 touch:h-11" disabled={busy}
+                    onClick={() => void act({ action: "update", id: task.id, revision: task.revision, state: "done" }, "Task marked done")}>
+                    <CircleCheck /> Mark done
+                  </Button>
+                )}
+                <DropdownMenu>
+                  <DropdownMenuTrigger render={<Button size="icon" variant="outline" className="ml-auto size-9 touch:size-11" aria-label="Task actions"><MoreHorizontal /></Button>} />
+                  <DropdownMenuContent align="end" className="w-44">
+                    {([["up", ArrowUp], ["down", ArrowDown], ["top", ArrowUpToLine]] as const).map(([direction, Icon]) =>
+                      <DropdownMenuItem key={direction} disabled={busy || !orderAvailable} className="touch:min-h-11"
+                        onClick={() => void act({ action: "move", id: task.id, direction, order_revision: data?.order_revision })}><Icon /> Move {direction}</DropdownMenuItem>)}
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem variant="destructive" className="touch:min-h-11" onClick={() => setRemove({ goal: task })}>Remove task</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            )}
+          </div>
+          <div ref={detailRef} data-task-detail-scroll="true" className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
+            <Tabs value={admin ? tab : "overview"} onValueChange={(value) => { setTab(String(value)); setPage(0); setTagId(""); }}>
+              {admin && (
+                <TabsList aria-label="Task details" className="w-full justify-stretch sm:w-fit">
+                  {task && <TabsTrigger value="overview" className="min-h-10 flex-1 px-2 touch:min-h-11 sm:px-3">Overview</TabsTrigger>}
+                  <TabsTrigger value="discussion" className="min-h-10 flex-1 px-2 touch:min-h-11 sm:px-3"><MessageSquare className="hidden sm:block" /> Discussion</TabsTrigger>
+                  <TabsTrigger value="documents" className="min-h-10 flex-1 px-2 touch:min-h-11 sm:px-3"><FileText className="hidden sm:block" /> Documents</TabsTrigger>
+                </TabsList>
+              )}
+              {task && <TabsContent value="overview" className="space-y-3">
+                {[
+                  ["Next action", task.next_action],
+                  ["Blocker", task.blocker],
+                  ["Notes", task.notes],
+                  ["Context", detail.rest],
+                ].map(([label, value]) => value && <Card key={label} size="sm">
+                  <CardHeader><CardTitle>{label}</CardTitle></CardHeader>
+                  <CardContent className="whitespace-pre-wrap [overflow-wrap:anywhere]">{value}</CardContent>
+                </Card>)}
+                {!task.next_action && !task.blocker && !task.notes && !detail.rest &&
+                  <Card size="sm"><CardContent className={textClass}>No next action or notes yet.</CardContent></Card>}
+              </TabsContent>}
+              {detailError && <p role="alert" className="text-sm text-destructive">{detailError}</p>}
+              {admin && <TabsContent value="discussion" className="space-y-3">
+                {task && <div className="flex justify-end">
+                  <Button size="sm" variant="outline" className="h-10 touch:h-11" title={`Start mail with ${task.id} filled in as the task ID`}
+                    onClick={() => { choose(""); startCompose("new", null, { taskId: task.id }); }}>
+                    <Plus /> New message
+                  </Button>
+                </div>}
+                {selected === "untagged" && <p className={textClass}>Use the tag button beside a message to choose its task, then save the tag.</p>}
+                {tagId && <Card size="sm">
+                  <CardHeader><CardTitle>Tag {tagId}</CardTitle></CardHeader>
+                  <CardContent>
+                    <form className="grid grid-cols-2 gap-2" onSubmit={(event) => {
+                      event.preventDefault();
+                      void act({ action: "tag", event_id: tagId, id: tagTarget || null }, "Message tag saved").then((result) => { if (result) setTagId(""); });
+                    }}>
+                      <SearchableSelect label="Task tag" className="col-span-2" value={tagTarget} onChange={setTagTarget} options={withChoice("Clear tag", taskOptions)} />
+                      <Button size="sm" className="h-10 touch:h-11" variant="outline" type="button" onClick={() => setTagId("")}>Cancel</Button>
+                      <Button type="submit" size="sm" className="h-10 touch:h-11" disabled={busy}>Save tag</Button>
+                    </form>
+                  </CardContent>
+                </Card>}
+                {!evidence?.events.length && <Card size="sm">
+                  <CardContent className={textClass}>{evidence
+                    ? task ? `No messages tagged ${task.id} yet. New message fills in the task ID for you.` : "No recent untagged messages."
+                    : "Loading discussion…"}</CardContent>
+                </Card>}
+                <ul className="space-y-2">
+                  {evidence?.events.map((row) => <li key={row.id}>
+                    <Card size="sm" className="flex-row items-center justify-between gap-2 p-2">
+                      <Button variant="ghost" className="h-auto min-h-11 min-w-0 flex-1 justify-start whitespace-normal"
+                        disabled={row.type === "agent.status"} onClick={() => { choose(""); openEvent(row.id); }}>
+                        <span className="min-w-0 text-left">
+                          <span className="flex flex-wrap gap-1.5">
+                            <Badge variant="ghost" className="px-0 font-mono">{row.id}</Badge>
+                            <Badge variant="outline">{row.from === "user" ? "USER" : row.from}</Badge>
+                            {row.task_id && <Badge variant="outline">{row.task_id}</Badge>}
+                          </span>
+                          <span className="line-clamp-2 text-sm leading-snug [overflow-wrap:anywhere]">{row.subject ?? row.excerpt}</span>
+                        </span>
+                      </Button>
+                      {row.type !== "agent.status" && <Button size="icon" variant="ghost" className="size-10 shrink-0 touch:size-11"
+                        aria-label={`Tag message ${row.id}`} title="Set tag" onClick={() => { setTagId(row.id); setTagTarget(task?.id ?? ""); }}><Tag /></Button>}
+                    </Card>
+                  </li>)}
+                </ul>
+              </TabsContent>}
+              {admin && <TabsContent value="documents" className="space-y-3">
+                {task ? <Card size="sm">
+                  <CardContent className="space-y-3">
+                    <form className="flex flex-wrap gap-2" onSubmit={(event) => {
+                      event.preventDefault();
+                      void act({ action: "link", id: task.id, path }, "File linked").then((result) => { if (result) setPath(""); });
+                    }}>
+                      <Input className="h-11 min-w-0 flex-1 text-base sm:h-9 sm:text-sm" aria-label="Repository file path" placeholder="Repository file path"
+                        value={path} onChange={(event) => setPath(event.target.value)} />
+                      <Button type="submit" size="sm" className="h-11 sm:h-9" title="Link an existing file by its repository-relative path"
+                        disabled={busy || !path.trim()}><Link2 /> Link</Button>
+                    </form>
+                    <p className={textClass}>Link an existing repository file, or upload a copy to Mailroom attachments.</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button size="sm" variant="outline" className="h-10 touch:h-11" disabled={busy} onClick={() => uploadRef.current?.click()}>
+                        <Upload /> Upload to task
+                      </Button>
+                      {detailDocLinks && (
+                        <>
+                          <OpenFolderAction
+                            admin={admin}
+                            folders={detailDocLinks.ownedFolders}
+                            onOpenFolder={setBrowseFolder}
+                            size="sm"
+                            label="Browse folder"
+                          />
+                          <CopyFolderPathAction
+                            admin={admin}
+                            folders={detailDocLinks.ownedFolders}
+                            size="sm"
+                          />
+                        </>
+                      )}
+                    </div>
+                    <Input type="file" ref={uploadRef} hidden disabled={busy} onChange={async (event) => {
+                      const file = event.target.files?.[0];
+                      event.target.value = "";
+                      if (!file) return;
+                      setBusy(true);
+                      try {
+                        const result = await api.uploadAttachment(file, file.name, task.id);
+                        if (result.link_warning || result.export_warning) toast.warning(result.link_warning || result.export_warning);
+                        else toast.success("File uploaded and linked");
+                        await load();
+                      } catch (cause) { toast.error(String(cause)); }
+                      finally { setBusy(false); }
+                    }} />
+                  </CardContent>
+                </Card> : <>
+                  <p className={textClass}>Choose the task, then select Link beside a document.</p>
+                  <SearchableSelect label="Task for untagged documents" value={linkTarget} onChange={setLinkTarget} options={withChoice("Choose a task", taskOptions)} />
+                </>}
+                {!evidence?.files.length && <Card size="sm">
+                  <CardContent className={textClass}>{evidence
+                    ? task ? `No documents linked to ${task.id} yet. File attachments on tagged messages also appear here.` : "No recent untagged documents."
+                    : "Loading documents…"}</CardContent>
+                </Card>}
+                {!!evidence?.files.length && (
+                  <ul className="space-y-2">
+                    {evidence.files.map((file) => renderDocFileItem(file, !!task && evidence.manual_files.includes(file)))}
+                  </ul>
+                )}
+              </TabsContent>}
+              {tab !== "overview" && (page > 0 || (page + 1) * pageSize < (tab === "discussion" ? evidence?.total ?? 0 : evidence?.file_total ?? 0)) && (
+                <div className="flex justify-between">
+                  <Button size="sm" variant="outline" className="h-10 touch:h-11" disabled={!page} onClick={() => setPage(page - 1)}>Previous</Button>
+                  <Button size="sm" variant="outline" className="h-10 touch:h-11" disabled={(page + 1) * pageSize >= (tab === "discussion" ? evidence?.total ?? 0 : evidence?.file_total ?? 0)} onClick={() => setPage(page + 1)}>Next</Button>
+                </div>
+              )}
+            </Tabs>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={!!edit} onOpenChange={(open) => { if (!open && !busy) setEdit(undefined); }}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
           <DialogHeader><DialogTitle>{edit?.id ? `Edit ${edit.id}` : edit?.kind === "goal" ? "New goal" : "New task"}</DialogTitle></DialogHeader>
