@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Activity, ArrowDown, ArrowUp, ArrowUpToLine, ChevronRight, CircleCheck, Columns3, FileText, Flag, FolderOpen, Link2, ListChecks, ListFilter, MessageSquare, MoreHorizontal, Plus, Tag, Target, TriangleAlert, Upload } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, ArrowUpToLine, ChevronRight, CircleCheck, Columns3, FileText, FolderOpen, Link2, ListChecks, MessageSquare, MoreHorizontal, Plus, Tag, Target, TriangleAlert, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SearchableSelect, type SearchOption } from "@/components/ui/searchable-select";
+import { HoverTip } from "@/components/ui/tooltip";
 import { useBackLayer } from "@/hooks/use-back-layer";
 import { api, fileHref } from "@/lib/api";
 import { GOAL_STATE_STYLE, PRIORITY_STYLE, TASK_STAGES, extractTaskDocLinks, isTaskInProgress, isTaskReadyNext, parseTaskStage, plainTaskTitle, resolveTaskFilesFolder, sortTasksByPriority, summarizeTaskProgress, type TaskDocFolder, type TaskProgressSummary } from "@/lib/format";
@@ -39,7 +40,6 @@ const stateOptions = Object.entries(GOAL_STATE_STYLE).map(([value, { label }]) =
 const stageOptions = TASK_STAGES.map((value) => ({ value, label: value }));
 const priorities = ["high", "normal", "low"].map((value) => ({ value, label: value[0].toUpperCase() + value.slice(1) }));
 const PRIORITY_FILTERS = [
-  { value: "", label: "All" },
   { value: "high", label: "High" },
   { value: "normal", label: "Normal" },
   { value: "low", label: "Low" },
@@ -65,13 +65,13 @@ function TaskProgressBar({
   if (inline) {
     return (
       <div {...dataAttr} className={cn("ml-auto flex shrink-0 items-center gap-1.5", className)}>
+        <HoverTip label={tooltip}>
         <div
           role="progressbar"
           aria-label={label}
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={summary.donePct}
-          title={tooltip}
           className="relative h-2 w-16 overflow-hidden rounded-full bg-muted min-[1360px]:w-28"
         >
           {summary.doneWidthPct > 0 && (
@@ -81,6 +81,7 @@ function TaskProgressBar({
             />
           )}
         </div>
+        </HoverTip>
         <span className="whitespace-nowrap text-[11px] font-medium text-emerald-700 tabular-nums dark:text-emerald-300 min-[1360px]:text-xs">
           {summary.done} of {summary.total} done
         </span>
@@ -89,13 +90,13 @@ function TaskProgressBar({
   }
   return (
     <div {...dataAttr} className={cn("flex flex-wrap items-center gap-x-3 gap-y-1.5", className)}>
+      <HoverTip label={tooltip}>
       <div
         role="progressbar"
         aria-label={label}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={summary.donePct}
-        title={tooltip}
         className={cn(
           "relative flex flex-1 overflow-hidden rounded-full bg-muted",
           compact ? "h-1.5 min-w-24" : "h-2 min-w-36",
@@ -108,6 +109,7 @@ function TaskProgressBar({
           />
         )}
       </div>
+      </HoverTip>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground tabular-nums">
         <span className="font-medium text-emerald-700 dark:text-emerald-300">
           {summary.done} of {summary.total} done
@@ -162,7 +164,7 @@ function TaskRowCard({
           type="button"
           onClick={() => onSelect(task.id)}
           aria-current={selected ? "true" : undefined}
-          className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex min-w-0 flex-1 cursor-pointer flex-wrap items-center gap-1.5 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <Badge variant="ghost" className="px-0 font-mono text-muted-foreground">{task.id}</Badge>
           {showGoalBadge && <Badge variant="outline" className="font-mono text-[11px]">{task.goal_id}</Badge>}
@@ -173,19 +175,20 @@ function TaskRowCard({
         </button>
         <div className="flex shrink-0 items-center gap-1.5">
           {filesFolder && (
-            <Button
-              type="button"
-              size="xs"
-              variant="outline"
-              data-open-files={task.id}
-              data-open-files-path={filesFolder.folder}
-              title={`Open files in ${filesFolder.folder}`}
-              className="h-6 gap-1 rounded-md border-border/80 px-2 text-[11px] text-muted-foreground hover:text-foreground touch:h-8"
-              onClick={() => onOpenFiles?.(filesFolder)}
-            >
-              <FolderOpen className="size-3 shrink-0" aria-hidden="true" />
-              Open files
-            </Button>
+            <HoverTip label={`Open files in ${filesFolder.folder}`}>
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                data-open-files={task.id}
+                data-open-files-path={filesFolder.folder}
+                className="h-6 cursor-pointer gap-1 rounded-md border-border/80 px-2 text-[11px] text-muted-foreground hover:text-foreground touch:h-8"
+                onClick={() => onOpenFiles?.(filesFolder)}
+              >
+                <FolderOpen className="size-3 shrink-0" aria-hidden="true" />
+                Open files
+              </Button>
+            </HoverTip>
           )}
           <PriorityFlagControl
             task={task}
@@ -199,7 +202,7 @@ function TaskRowCard({
         type="button"
         onClick={() => onSelect(task.id)}
         aria-current={selected ? "true" : undefined}
-        className="flex h-auto min-h-9 w-full min-w-0 items-center justify-between gap-3 rounded-b-xl px-3 pt-0.5 pb-2.5 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring touch:pb-3"
+        className="flex h-auto min-h-9 w-full min-w-0 cursor-pointer items-center justify-between gap-3 rounded-b-xl px-3 pt-0.5 pb-2.5 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring touch:pb-3"
       >
         <span className="min-w-0 flex-1 space-y-1">
           <span
@@ -249,7 +252,6 @@ export function GoalsView() {
   const [ownerFilter, setOwnerFilter] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
   const [viewMode, setViewMode] = useState<GoalsViewMode>("goals");
-  const [showFilters, setShowFilters] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<{ filter: string; ids: string[] }>();
   const [browseFolder, setBrowseFolder] = useState<TaskDocFolder | null>(null);
   const [evidence, setEvidence] = useState<Evidence>();
@@ -479,8 +481,17 @@ export function GoalsView() {
   const withChoice = (label: string, options: SearchOption[]): SearchOption[] => [{ value: "", label }, ...options];
 
   const hasClearableFilters = !!(activeGoal || stateFilter || stageFilter || ownerFilter || priorityFilter);
-  const dropdownFilterCount = (stateFilter ? 1 : 0) + (stageFilter ? 1 : 0) + (ownerFilter ? 1 : 0) + (viewMode !== "board" && goalFilter ? 1 : 0);
-  const overallProgress = summarizeTaskProgress(data?.tasks ?? []);
+  const progressTasks = viewMode === "board" ? boardRows
+    : viewMode === "decisions" ? decisionRows
+    : viewMode === "ready" ? readyRows
+    : viewMode === "active" ? activeRows
+    : rows;
+  const headerProgress = summarizeTaskProgress(progressTasks);
+  const progressLabel = activeGoal
+    ? `${activeGoal} task completion progress`
+    : hasClearableFilters || search.trim() || viewMode === "decisions" || viewMode === "ready" || viewMode === "active"
+      ? "Filtered task completion progress"
+      : "Overall task completion progress";
 
   function renderDocFileItem(file: string, canUnlink: boolean) {
     const href = fileHref(file);
@@ -536,101 +547,53 @@ export function GoalsView() {
                     onClick={() => enterAcrossView("goals")}>
                     <Target className="size-3.5" aria-hidden="true" /> Goals <Badge variant="outline" className="px-1 text-[10px]">{data.goals.length}</Badge>
                   </Button>
-                  <Button size="xs" variant={viewMode === "decisions" ? "outline" : "ghost"} title="Needs your decision" className={cn("h-7 gap-1 px-1.5 text-xs touch:h-9", viewMode === "decisions" && ACTIVE_FILTER_OUTLINE)} data-view-tab="decisions"
-                    onClick={() => enterAcrossView("decisions")}>
-                    <TriangleAlert className="size-3.5" aria-hidden="true" /> Decisions <Badge variant="outline" className="px-1 text-[10px]">{totalDecisions}</Badge>
-                  </Button>
-                  <Button size="xs" variant={viewMode === "ready" ? "outline" : "ghost"} title="Ready next" className={cn("h-7 gap-1 px-1.5 text-xs touch:h-9", viewMode === "ready" && ACTIVE_FILTER_OUTLINE)} data-view-tab="ready"
-                    onClick={() => enterAcrossView("ready")}>
-                    <ListChecks className="size-3.5" aria-hidden="true" /> Ready <Badge variant="outline" className="px-1 text-[10px]">{totalReady}</Badge>
-                  </Button>
-                  <Button size="xs" variant={viewMode === "active" ? "outline" : "ghost"} title="In progress" className={cn("h-7 gap-1 px-1.5 text-xs touch:h-9", viewMode === "active" && ACTIVE_FILTER_OUTLINE)} data-view-tab="active"
-                    onClick={() => enterAcrossView("active")}>
-                    <Activity className="size-3.5" aria-hidden="true" /> Active <Badge variant="outline" className="px-1 text-[10px]">{totalActive}</Badge>
-                  </Button>
-                  <Button size="xs" variant={viewMode === "board" ? "outline" : "ghost"} title="Stage board" className={cn("h-7 gap-1 px-1.5 text-xs touch:h-9", viewMode === "board" && ACTIVE_FILTER_OUTLINE)} data-view-tab="board"
-                    onClick={() => setViewMode("board")}>
-                    <Columns3 className="size-3.5" aria-hidden="true" /> Board <Badge variant="outline" className="px-1 text-[10px]">{boardRows.length}</Badge>
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="outline"
-                    className={cn(
-                      "size-7 touch:size-9",
-                      (showFilters || dropdownFilterCount > 0)
-                        ? ACTIVE_FILTER_OUTLINE
-                        : "border-transparent bg-transparent hover:border-border/70 hover:bg-muted/60",
-                    )}
-                    aria-label="Filters"
-                    aria-expanded={showFilters}
-                    title="Filters"
-                    onClick={() => setShowFilters((value) => !value)}
-                  >
-                    <ListFilter className="size-3.5" />
-                  </Button>
-                  {admin && (
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      aria-label="Untagged"
-                      title="Untagged"
-                      className="h-7 gap-1 px-1.5 text-xs touch:h-9"
-                      onClick={() => choose("untagged")}
-                    >
-                      <Tag className="size-3.5" aria-hidden="true" />
-                      <span className="hidden min-[1360px]:inline">Untagged</span>
+                  <HoverTip label="Needs your decision">
+                    <Button size="xs" variant={viewMode === "decisions" ? "outline" : "ghost"} className={cn("h-7 gap-1 px-1.5 text-xs touch:h-9", viewMode === "decisions" && ACTIVE_FILTER_OUTLINE)} data-view-tab="decisions"
+                      onClick={() => enterAcrossView("decisions")}>
+                      <TriangleAlert className="size-3.5" aria-hidden="true" /> Decisions <Badge variant="outline" className="px-1 text-[10px]">{totalDecisions}</Badge>
                     </Button>
-                  )}
-                </div>
-                <span aria-hidden="true" className="mx-0.5 hidden h-4 w-px bg-border/80 min-[1360px]:block" />
-                <div role="group" aria-label="Filter by priority" className="flex flex-wrap items-center gap-0.5 min-[1360px]:gap-1">
-                  {PRIORITY_FILTERS.map((opt) => {
-                    const active = priorityFilter === opt.value;
-                    const count = priorityCounts[opt.value];
-                    const flagStyle = opt.value ? PRIORITY_STYLE[opt.value] : null;
-                    return (
+                  </HoverTip>
+                  <HoverTip label="Ready next">
+                    <Button size="xs" variant={viewMode === "ready" ? "outline" : "ghost"} className={cn("h-7 gap-1 px-1.5 text-xs touch:h-9", viewMode === "ready" && ACTIVE_FILTER_OUTLINE)} data-view-tab="ready"
+                      onClick={() => enterAcrossView("ready")}>
+                      <ListChecks className="size-3.5" aria-hidden="true" /> Ready <Badge variant="outline" className="px-1 text-[10px]">{totalReady}</Badge>
+                    </Button>
+                  </HoverTip>
+                  <HoverTip label="In progress">
+                    <Button size="xs" variant={viewMode === "active" ? "outline" : "ghost"} className={cn("h-7 gap-1 px-1.5 text-xs touch:h-9", viewMode === "active" && ACTIVE_FILTER_OUTLINE)} data-view-tab="active"
+                      onClick={() => enterAcrossView("active")}>
+                      <Activity className="size-3.5" aria-hidden="true" /> Active <Badge variant="outline" className="px-1 text-[10px]">{totalActive}</Badge>
+                    </Button>
+                  </HoverTip>
+                  <HoverTip label="Stage board">
+                    <Button size="xs" variant={viewMode === "board" ? "outline" : "ghost"} className={cn("h-7 gap-1 px-1.5 text-xs touch:h-9", viewMode === "board" && ACTIVE_FILTER_OUTLINE)} data-view-tab="board"
+                      onClick={() => setViewMode("board")}>
+                      <Columns3 className="size-3.5" aria-hidden="true" /> Board <Badge variant="outline" className="px-1 text-[10px]">{boardRows.length}</Badge>
+                    </Button>
+                  </HoverTip>
+                  {hasClearableFilters && (
+                    <HoverTip label="Reset filters">
                       <Button
-                        key={opt.value || "all"}
                         type="button"
                         size="xs"
                         variant="outline"
-                        aria-pressed={active}
-                        data-priority-filter={opt.value || "all"}
-                        className={cn(
-                          "h-7 gap-1 px-1.5 text-[11px] tabular-nums touch:h-9",
-                          active ? ACTIVE_FILTER_OUTLINE : "border-border/80",
-                        )}
-                        onClick={() => setPriorityFilter(opt.value)}
+                        data-clear-filters="true"
+                        className="h-7 border-border/80 px-1.5 text-[11px] text-muted-foreground hover:text-foreground touch:h-9"
+                        onClick={clearViewFilters}
                       >
-                        {flagStyle && <Flag className={cn("size-3 shrink-0 fill-current", flagStyle.dotCls)} aria-hidden="true" />}
-                        {opt.label}
-                        <span className="text-muted-foreground">({count})</span>
+                        Reset
                       </Button>
-                    );
-                  })}
-                  {hasClearableFilters && (
-                    <Button
-                      type="button"
-                      size="xs"
-                      variant="outline"
-                      data-clear-filters="true"
-                      title="Reset filters"
-                      className="h-7 border-border/80 px-1.5 text-[11px] text-muted-foreground hover:text-foreground touch:h-9"
-                      onClick={clearViewFilters}
-                    >
-                      Reset
-                    </Button>
+                    </HoverTip>
                   )}
                 </div>
-                <span aria-hidden="true" className="mx-0.5 hidden h-4 w-px bg-border/80 min-[1360px]:block" />
                 <TaskProgressBar
                   inline
                   dataAttr={{ "data-overall-progress": "true" }}
-                  summary={overallProgress}
-                  label="Overall task completion progress"
+                  summary={headerProgress}
+                  label={progressLabel}
                 />
                 </div>
-                {showFilters && <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3 min-[900px]:grid-cols-2" aria-label="Task filters">
+                <div className="mb-3 grid grid-cols-5 gap-2" aria-label="Task filters">
                   <SearchableSelect
                     label="Filter by goal"
                     value={activeGoal}
@@ -659,62 +622,20 @@ export function GoalsView() {
                     options={withChoice("Any owner", [{ value: "-", label: "Unassigned" }, ...personOptions])}
                     className={ownerFilter ? ACTIVE_FILTER_OUTLINE : undefined}
                   />
-                </div>}
+                  <SearchableSelect
+                    label="Filter by priority"
+                    value={priorityFilter}
+                    onChange={setPriorityFilter}
+                    options={withChoice("Any priority", PRIORITY_FILTERS.map((opt) => ({
+                      value: opt.value,
+                      label: `${opt.label} (${priorityCounts[opt.value]})`,
+                    })))}
+                    className={priorityFilter ? ACTIVE_FILTER_OUTLINE : undefined}
+                  />
+                </div>
               </div>
               {viewMode === "board" ? (
                 <>
-                  <div className="mx-auto mb-2 w-full max-w-7xl shrink-0 space-y-1.5">
-                    <div role="group" aria-label="Filter stage board by goal" className="flex flex-wrap items-center gap-1.5">
-                      <Button
-                        type="button"
-                        size="xs"
-                        variant="outline"
-                        aria-pressed={!boardGoal}
-                        data-board-goal=""
-                        className={cn(
-                          "h-7 px-2 text-xs",
-                          !boardGoal
-                            ? "border-primary bg-primary/15 font-medium text-foreground ring-1 ring-primary/40"
-                            : "border-border/80",
-                        )}
-                        onClick={() => setBoardGoal("")}
-                      >
-                        All goals ({data.tasks.length})
-                      </Button>
-                      {data.goals.map((g) => (
-                        <Button
-                          key={g.id}
-                          type="button"
-                          size="xs"
-                          variant="outline"
-                          aria-pressed={boardGoal === g.id}
-                          data-board-goal={g.id}
-                          className={cn(
-                            "h-7 px-2 font-mono text-xs",
-                            boardGoal === g.id
-                              ? "border-primary bg-primary/15 font-medium text-foreground ring-1 ring-primary/40"
-                              : "border-border/80",
-                          )}
-                          onClick={() => setBoardGoal(boardGoal === g.id ? "" : g.id)}
-                        >
-                          {g.id}
-                        </Button>
-                      ))}
-                    </div>
-                    {goal && (
-                      <div className="space-y-1">
-                        <p className="text-xs text-muted-foreground">
-                          Showing <span className="font-mono font-medium text-foreground">{goal.id}</span> · {plainTaskTitle(goal.title)}
-                        </p>
-                        <TaskProgressBar
-                          dataAttr={{ "data-board-goal-progress": goal.id }}
-                          summary={summarizeTaskProgress(data.tasks.filter((row) => row.goal_id === goal.id))}
-                          label={`${goal.id} progress`}
-                          compact
-                        />
-                      </div>
-                    )}
-                  </div>
                   {!boardRows.length && <Card size="sm" className="mx-auto mb-2 w-full max-w-7xl shrink-0"><CardContent className={textClass}>No tasks match.</CardContent></Card>}
                   <GoalsBoard tasks={boardRows} selectedId={selected} admin={admin} busy={busy} onSelect={choose} onChangePriority={handleChangePriority} onOpenFiles={setBrowseFolder} />
                 </>
@@ -797,18 +718,19 @@ export function GoalsView() {
                                   )}
                                   <Badge variant="secondary" className="tabular-nums" aria-label={`${items.length} tasks`}>{items.length}</Badge>
                                 </AccordionTrigger>
-                                <Button
-                                  type="button"
-                                  size="xs"
-                                  variant="outline"
-                                  data-open-goal-board={group.id}
-                                  title={`Open ${group.id} 6-stage board`}
-                                  className="h-8 gap-1 px-2 text-xs"
-                                  onClick={() => openGoalBoard(group.id)}
-                                >
-                                  <Columns3 className="size-3.5" aria-hidden="true" />
-                                  <span className="hidden sm:inline">Stage board</span>
-                                </Button>
+                                <HoverTip label={`Open ${group.id} 6-stage board`}>
+                                  <Button
+                                    type="button"
+                                    size="xs"
+                                    variant="outline"
+                                    data-open-goal-board={group.id}
+                                    className="h-8 cursor-pointer gap-1 px-2 text-xs"
+                                    onClick={() => openGoalBoard(group.id)}
+                                  >
+                                    <Columns3 className="size-3.5" aria-hidden="true" />
+                                    <span className="hidden sm:inline">Stage board</span>
+                                  </Button>
+                                </HoverTip>
                                 {admin && (
                                   <DropdownMenu>
                                     <DropdownMenuTrigger render={<Button size="icon" variant="ghost" className="size-9 touch:size-11" aria-label={`Actions for ${group.id}`}><MoreHorizontal /></Button>} />
@@ -898,7 +820,9 @@ export function GoalsView() {
             </DialogTitle>
             {task && admin && (
               <div className="flex flex-wrap items-center gap-2 pt-0.5">
-                <Button size="sm" className="h-9 touch:h-11" title="Update the owner, state, priority, next action, blocker, notes, or decision flag" onClick={() => openEditor("task", task)}>Edit task</Button>
+                <HoverTip label="Update the owner, state, priority, next action, blocker, notes, or decision flag">
+                  <Button size="sm" className="h-9 cursor-pointer touch:h-11" onClick={() => openEditor("task", task)}>Edit task</Button>
+                </HoverTip>
                 {task.state !== "done" && !task.decision && (
                   <Button size="sm" variant="outline" className="h-9 touch:h-11" disabled={busy}
                     onClick={() => void act({ action: "update", id: task.id, revision: task.revision, state: "done" }, "Task marked done")}>
@@ -943,10 +867,12 @@ export function GoalsView() {
               {detailError && <p role="alert" className="text-sm text-destructive">{detailError}</p>}
               {admin && <TabsContent value="discussion" className="space-y-3">
                 {task && <div className="flex justify-end">
-                  <Button size="sm" variant="outline" className="h-10 touch:h-11" title={`Start mail with ${task.id} filled in as the task ID`}
-                    onClick={() => { choose(""); startCompose("new", null, { taskId: task.id }); }}>
-                    <Plus /> New message
-                  </Button>
+                  <HoverTip label={`Start mail with ${task.id} filled in as the task ID`}>
+                    <Button size="sm" variant="outline" className="h-10 cursor-pointer touch:h-11"
+                      onClick={() => { choose(""); startCompose("new", null, { taskId: task.id }); }}>
+                      <Plus /> New message
+                    </Button>
+                  </HoverTip>
                 </div>}
                 {selected === "untagged" && <p className={textClass}>Use the tag button beside a message to choose its task, then save the tag.</p>}
                 {tagId && <Card size="sm">
@@ -981,8 +907,12 @@ export function GoalsView() {
                           <span className="line-clamp-2 text-sm leading-snug [overflow-wrap:anywhere]">{row.subject ?? row.excerpt}</span>
                         </span>
                       </Button>
-                      {row.type !== "agent.status" && <Button size="icon" variant="ghost" className="size-10 shrink-0 touch:size-11"
-                        aria-label={`Tag message ${row.id}`} title="Set tag" onClick={() => { setTagId(row.id); setTagTarget(task?.id ?? ""); }}><Tag /></Button>}
+                      {row.type !== "agent.status" && (
+                        <HoverTip label="Set tag">
+                          <Button size="icon" variant="ghost" className="size-10 shrink-0 cursor-pointer touch:size-11"
+                            aria-label={`Tag message ${row.id}`} onClick={() => { setTagId(row.id); setTagTarget(task?.id ?? ""); }}><Tag /></Button>
+                        </HoverTip>
+                      )}
                     </Card>
                   </li>)}
                 </ul>
@@ -996,8 +926,10 @@ export function GoalsView() {
                     }}>
                       <Input className="h-11 min-w-0 flex-1 text-base sm:h-9 sm:text-sm" aria-label="Repository file path" placeholder="Repository file path"
                         value={path} onChange={(event) => setPath(event.target.value)} />
-                      <Button type="submit" size="sm" className="h-11 sm:h-9" title="Link an existing file by its repository-relative path"
-                        disabled={busy || !path.trim()}><Link2 /> Link</Button>
+                      <HoverTip label="Link an existing file by its repository-relative path">
+                        <Button type="submit" size="sm" className="h-11 cursor-pointer sm:h-9"
+                          disabled={busy || !path.trim()}><Link2 /> Link</Button>
+                      </HoverTip>
                     </form>
                     <p className={textClass}>Link an existing repository file, or upload a copy to Mailroom attachments.</p>
                     <div className="flex flex-wrap items-center gap-2">

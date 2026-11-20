@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Archive, CheckCheck, Flag, Mail, MailOpen, Menu, Paperclip, RotateCcw, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { lastTs, TASK_FILTERS, threadInFolder, threadMatches, visibleEvents, snippet, type Thread } from "@/lib/threads";
+import { lastTs, matchSnippet, messageHits, TASK_FILTERS, threadInFolder, threadMatches, visibleEvents, snippet, type Thread } from "@/lib/threads";
 import { GOAL_STATE_STYLE, listTime, plainTaskTitle } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,7 +13,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { AgentAvatar, Pill } from "./bits";
+import { AgentAvatar, Highlight, Pill } from "./bits";
 import { useMailroom } from "./context";
 
 const PAGE = 60;
@@ -59,10 +59,13 @@ function participantsLine(t: Thread, evs: ReturnType<typeof visibleEvents>) {
 }
 
 function ThreadRow({ t }: { t: Thread }) {
-  const { folder, ms, selected, select, mark, openHumanIds } = useMailroom();
+  const { folder, ms, selected, select, mark, openHumanIds, search } = useMailroom();
   const evs = visibleEvents(t, folder, ms);
   const last = evs[evs.length - 1];
   if (!last) return null;
+  const query = search.trim();
+  const hits = query ? messageHits(evs, query) : [];
+  const preview = hits.at(-1) ?? last;
   const unread = evs.filter(ms.isUnread).length;
   const flagged = evs.some(ms.isFlagged);
   const needs = evs.some((e) => openHumanIds.has(e.id));
@@ -80,8 +83,8 @@ function ThreadRow({ t }: { t: Thread }) {
       role="button"
       tabIndex={0}
       data-thread={t.key}
-      onClick={() => select(t.key)}
-      onKeyDown={(e) => e.key === "Enter" && select(t.key)}
+      onClick={() => select(t.key, { focus: hits.at(-1)?.id ?? null })}
+      onKeyDown={(e) => e.key === "Enter" && select(t.key, { focus: hits.at(-1)?.id ?? null })}
       className={cn(
         "group relative flex cursor-pointer gap-3 rounded-lg border-b border-l-[3px] border-l-transparent px-3 py-2.5 outline-none transition-colors touch:py-3",
         sel ? "tool-active" : "hover:bg-muted/60 active:bg-muted",
@@ -89,18 +92,24 @@ function ThreadRow({ t }: { t: Thread }) {
         "focus-visible:ring-2 focus-visible:ring-ring/50",
       )}
     >
-      <AgentAvatar id={last.from} />
+      <AgentAvatar id={preview.from} />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
           <span className={cn("min-w-0 flex-1 truncate text-sm", unread ? "font-semibold" : "text-foreground/90")}>{participants}</span>
           <span className={cn("shrink-0 text-xs tabular-nums [@media(hover:hover)]:group-hover:invisible", unread ? "font-semibold text-primary" : "text-muted-foreground")}>
-            {listTime(last.ts)}
+            {listTime(preview.ts)}
           </span>
         </div>
         <div className="mt-1 flex items-center gap-1.5">
           {needs && <AlertTriangle className="size-3.5 shrink-0 text-amber-500" />}
-          <span className={cn("min-w-0 truncate text-sm", unread ? "font-semibold text-primary" : "text-foreground")} title={title}>{title}</span>
-          {evs.length > 1 && <span className="shrink-0 text-xs text-muted-foreground">({evs.length})</span>}
+          <span className={cn("min-w-0 truncate text-sm", unread ? "font-semibold text-primary" : "text-foreground")} title={title}>
+            {query ? <Highlight text={title} query={query} /> : title}
+          </span>
+          {hits.length > 0 ? (
+            <span className="shrink-0 rounded bg-amber-300/80 px-1 text-[11px] font-medium text-foreground dark:bg-amber-400/40">
+              {hits.length} {hits.length === 1 ? "match" : "matches"}
+            </span>
+          ) : evs.length > 1 && <span className="shrink-0 text-xs text-muted-foreground">({evs.length})</span>}
           <span className="ml-auto flex shrink-0 items-center gap-1">
             {hasFiles && <Paperclip className="size-3.5 text-muted-foreground" />}
             {flagged && <Flag className="size-3.5 fill-red-500 text-red-500" />}
@@ -108,7 +117,9 @@ function ThreadRow({ t }: { t: Thread }) {
             {folder === "tasks" && !t.goalTask && <Pill className="bg-muted text-muted-foreground">Unlinked</Pill>}
           </span>
         </div>
-        <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{snippet(last.body, 220)}</p>
+        <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+          {hits.length ? <Highlight text={matchSnippet(preview.body, query)} query={query} /> : snippet(last.body, 220)}
+        </p>
       </div>
       <div className="absolute top-1 right-2 hidden items-center gap-0.5 rounded-lg border bg-background/95 p-0.5 shadow-xs [@media(hover:hover)]:group-hover:flex">
         {deletedView ? (
@@ -200,7 +211,7 @@ function ArchiveOlder() {
 }
 
 export function ThreadList() {
-  const { folder, agents, ms, mark, selected, select, taskFilter, setTaskFilter, setNavOpen, snap } = useMailroom();
+  const { folder, agents, ms, mark, selected, select, taskFilter, setTaskFilter, setNavOpen, snap, search } = useMailroom();
   const list = useFolderThreads();
   const [limit, setLimit] = useState(PAGE);
   const [unreadOnly, setUnreadOnly] = useState(false);
@@ -226,11 +237,15 @@ export function ThreadList() {
       e.preventDefault();
       const idx = shown.findIndex((t) => t.key === selected);
       const next = e.key === "j" || e.key === "ArrowDown" ? Math.min(shown.length - 1, idx + 1) : Math.max(0, idx - 1);
-      if (shown[next]) select(shown[next].key);
+      if (shown[next]) {
+        const visible = visibleEvents(shown[next], folder, ms);
+        const hits = search.trim() ? messageHits(visible, search) : [];
+        select(shown[next].key, { focus: hits.at(-1)?.id ?? null });
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [shown, selected, select]);
+  }, [shown, selected, select, folder, ms, search]);
 
   const agentName = folder.startsWith("agent:") ? agents.get(folder.slice(6))?.name : undefined;
 

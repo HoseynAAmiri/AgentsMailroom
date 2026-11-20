@@ -25,6 +25,7 @@ import {
   type TaskDocFolder,
   type TaskStage,
 } from "@/lib/format";
+import { HoverTip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 export type TaskState = "todo" | "doing" | "blocked" | "done";
@@ -93,40 +94,43 @@ export function StageBadge({
   if (stage) {
     const meta = TASK_STAGE_META[stage];
     return (
-      <Badge
-        variant="outline"
-        data-stage={stage}
-        title={`${meta.label} — ${meta.description}`}
-        className={TASK_STAGE_STYLE[stage].cls}
-      >
-        {stage === "Done" && <CircleCheck data-icon="inline-start" aria-hidden="true" />}
-        {meta.shortLabel}
-      </Badge>
+      <HoverTip label={`${meta.label} — ${meta.description}`}>
+        <Badge
+          variant="outline"
+          data-stage={stage}
+          className={TASK_STAGE_STYLE[stage].cls}
+        >
+          {stage === "Done" && <CircleCheck data-icon="inline-start" aria-hidden="true" />}
+          {meta.shortLabel}
+        </Badge>
+      </HoverTip>
     );
   }
   if (!parsed) return null;
   if (parsed.kind === "malformed") {
     const raw = parsed.rawPrefix ?? "";
     return (
-      <Badge
-        variant="outline"
-        data-stage="malformed"
-        title={`Malformed stage prefix: [${raw}]`}
-        className="border-amber-500/50 bg-amber-500/15 text-amber-800 dark:text-amber-300"
-      >
-        {raw ? `Malformed: [${raw}]` : "Malformed: []"}
-      </Badge>
+      <HoverTip label={`Malformed stage prefix: [${raw}]`}>
+        <Badge
+          variant="outline"
+          data-stage="malformed"
+          className="border-amber-500/50 bg-amber-500/15 text-amber-800 dark:text-amber-300"
+        >
+          {raw ? `Malformed: [${raw}]` : "Malformed: []"}
+        </Badge>
+      </HoverTip>
     );
   }
   return (
-    <Badge
-      variant="outline"
-      data-stage="unprefixed"
-      title="Missing D38 [Stage] prefix in next_action"
-      className="border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300"
-    >
-      No stage
-    </Badge>
+    <HoverTip label="Missing [Stage] prefix in the next action">
+      <Badge
+        variant="outline"
+        data-stage="unprefixed"
+        className="border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+      >
+        No stage
+      </Badge>
+    </HoverTip>
   );
 }
 
@@ -137,15 +141,16 @@ export function PriorityFlag({ priority }: { priority?: TaskPriority | string | 
   const key: TaskPriority = raw === "high" || raw === "low" ? raw : "normal";
   const style = PRIORITY_STYLE[key];
   return (
-    <Badge
-      variant="outline"
-      data-task-priority={key}
-      title={`Priority: ${style.label}`}
-      className={cn("gap-1 text-[11px]", style.cls)}
-    >
-      <Flag className={cn("size-3 fill-current", style.dotCls)} aria-hidden="true" />
-      {style.label}
-    </Badge>
+    <HoverTip label={`Priority: ${style.label}`}>
+      <Badge
+        variant="outline"
+        data-task-priority={key}
+        className={cn("gap-1 text-[11px]", style.cls)}
+      >
+        <Flag className={cn("size-3 fill-current", style.dotCls)} aria-hidden="true" />
+        {style.label}
+      </Badge>
+    </HoverTip>
   );
 }
 
@@ -175,6 +180,7 @@ export function PriorityFlagControl({
 
   return (
     <DropdownMenu>
+      <HoverTip label="Change priority (USER only)">
       <DropdownMenuTrigger
         render={
           <Button
@@ -185,7 +191,6 @@ export function PriorityFlagControl({
             data-priority-control={task.id}
             data-task-priority={current}
             aria-label={`Priority for ${task.id}: ${style.label}. Change priority`}
-            title="Change priority (USER only)"
             className={cn(
               compact
                 ? "h-5 cursor-pointer gap-0.5 rounded px-1.5 text-[10px] font-medium transition-[filter,box-shadow] hover:brightness-95 dark:hover:brightness-110 touch:h-7"
@@ -199,6 +204,7 @@ export function PriorityFlagControl({
           </Button>
         }
       />
+      </HoverTip>
       <DropdownMenuContent align="end" className="w-40">
         <DropdownMenuGroup>
           <DropdownMenuLabel className="text-[11px]">Priority (USER)</DropdownMenuLabel>
@@ -260,7 +266,7 @@ function BoardCard({ task, parsed, selectedId, admin, busy = false, onSelect, on
           type="button"
           onClick={() => onSelect(task.id)}
           aria-current={isSelected ? "true" : undefined}
-          className="flex min-w-0 flex-1 flex-wrap items-center gap-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex min-w-0 flex-1 cursor-pointer flex-wrap items-center gap-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <Badge variant="ghost" className="px-0 font-mono text-[11px] text-muted-foreground">
             {task.id}
@@ -285,7 +291,7 @@ function BoardCard({ task, parsed, selectedId, admin, busy = false, onSelect, on
         onClick={() => onSelect(task.id)}
         aria-current={isSelected ? "true" : undefined}
         className={cn(
-          "block w-full min-w-0 px-2.5 pt-0.5 pb-2 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "block w-full min-w-0 cursor-pointer px-2.5 pt-0.5 pb-2 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           !filesFolder && "rounded-b-xl",
         )}
       >
@@ -310,19 +316,20 @@ function BoardCard({ task, parsed, selectedId, admin, busy = false, onSelect, on
       </button>
       {filesFolder && (
         <div className="flex items-center border-t border-border/60 px-2 py-1">
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost"
-            data-open-files={task.id}
-            data-open-files-path={filesFolder.folder}
-            title={`Open files in ${filesFolder.folder}`}
-            className="h-6 gap-1 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
-            onClick={() => onOpenFiles?.(filesFolder)}
-          >
-            <FolderOpen className="size-3 shrink-0" aria-hidden="true" />
-            Open files
-          </Button>
+          <HoverTip label={`Open files in ${filesFolder.folder}`}>
+            <Button
+              type="button"
+              size="xs"
+              variant="ghost"
+              data-open-files={task.id}
+              data-open-files-path={filesFolder.folder}
+              className="h-6 cursor-pointer gap-1 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+              onClick={() => onOpenFiles?.(filesFolder)}
+            >
+              <FolderOpen className="size-3 shrink-0" aria-hidden="true" />
+              Open files
+            </Button>
+          </HoverTip>
         </div>
       )}
     </Card>
@@ -432,7 +439,9 @@ export function GoalsBoard({
                   </Badge>
                 </div>
               </div>
-              <p className="truncate text-[11px] text-muted-foreground" title={meta.description}>{meta.description}</p>
+              <HoverTip label={meta.description}>
+                <p className="truncate text-[11px] text-muted-foreground">{meta.description}</p>
+              </HoverTip>
             </header>
             {col.items.length > 0 ? (
               <div data-stage-scroll={col.stage} className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-0.5">

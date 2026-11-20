@@ -56,7 +56,7 @@ interface Ctx {
   folder: FolderId;
   setFolder: (f: FolderId) => void;
   selected: string | null;
-  select: (key: string | null, opts?: { markRead?: boolean }) => void;
+  select: (key: string | null, opts?: { markRead?: boolean; focus?: string | null }) => void;
   focusEvent: string | null;
   openEvent: (id: string) => void;
   goalTaskId: string;
@@ -224,9 +224,9 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
   );
 
   const select = useCallback(
-    (key: string | null, opts?: { markRead?: boolean }) => {
+    (key: string | null, opts?: { markRead?: boolean; focus?: string | null }) => {
       setSelected(key);
-      setFocusEvent(null);
+      setFocusEvent(opts?.focus ?? null);
       if (key && opts?.markRead !== false) {
         const t = threads.find((x) => x.key === key);
         const ids = t?.events.filter(ms.isUnread).map((e) => e.id) ?? [];

@@ -168,6 +168,24 @@ export function lastTs(t: Thread, folder: FolderId, ms: MailState): string {
   return v.length ? v[v.length - 1].ts : "";
 }
 
+/** Messages whose id or body contains the keyword, in conversation order. */
+export function messageHits(events: readonly BusEvent[], q: string): BusEvent[] {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return [];
+  return events.filter((e) => e.id.toLowerCase() === needle || e.body.toLowerCase().includes(needle));
+}
+
+/** Excerpt centered on the keyword so a list row shows the hit, not the start of the message. */
+export function matchSnippet(body: string, q: string, n = 180): string {
+  const flat = body.replace(/\s+/g, " ").trim();
+  const needle = q.trim().toLowerCase();
+  const at = needle ? flat.toLowerCase().indexOf(needle) : -1;
+  if (at < 0) return snippet(flat, n);
+  const start = Math.max(0, at - 48);
+  const end = Math.min(flat.length, Math.max(start + n, at + needle.length + 48));
+  return `${start > 0 ? "…" : ""}${flat.slice(start, end)}${end < flat.length ? "…" : ""}`;
+}
+
 export function threadMatches(t: Thread, q: string, agents: Map<string, Agent>): boolean {
   if (!q) return true;
   const needle = q.toLowerCase();

@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useCanHover, useIsMobile, useIsTablet } from "@/hooks/use-mobile";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { HoverTip, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import dynamic from "next/dynamic";
 import { FilesView } from "@/components/files/files-view";
 import { FileViewer } from "@/components/viewer/file-viewer";
@@ -42,7 +42,11 @@ function Clock() {
     const i = setInterval(tick, 1000);
     return () => clearInterval(i);
   }, []);
-  return <span title="Local time" className="inline-block w-[8ch] whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground">{t}</span>;
+  return (
+    <HoverTip label="Local time" side="bottom">
+      <span className="inline-block w-[8ch] whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground">{t}</span>
+    </HoverTip>
+  );
 }
 
 function ThemeToggle() {
@@ -52,16 +56,17 @@ function ThemeToggle() {
     if (resolvedTheme === "light" || resolvedTheme === "dark") applyThemeMeta(resolvedTheme);
   }, [resolvedTheme]);
   return (
-    <Button
-      variant="ghost"
-      size="icon-sm"
-      aria-label="Theme"
-      title={dark ? "Switch to Light Mode" : "Switch to Dark Mode"}
-      onClick={() => setTheme(dark ? "light" : "dark")}
-      className="text-muted-foreground hover:text-foreground touch:size-9"
-    >
-      {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
-    </Button>
+    <HoverTip label={dark ? "Switch to Light Mode" : "Switch to Dark Mode"} side="bottom">
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label="Theme"
+        onClick={() => setTheme(dark ? "light" : "dark")}
+        className="text-muted-foreground hover:text-foreground touch:size-9"
+      >
+        {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+      </Button>
+    </HoverTip>
   );
 }
 
@@ -147,14 +152,16 @@ function TopBar() {
         <span className="hidden xl:inline">
           <Clock />
         </span>
-        <Button variant="ghost" size="icon-sm" aria-label="Refresh current view" title="Refresh current view"
-          disabled={refreshing} className="text-muted-foreground hover:text-foreground touch:size-10" onClick={async () => {
-            setRefreshing(true);
-            try { await refreshActiveView(); }
-            finally { setRefreshing(false); }
-          }}>
-          <RefreshCw className={refreshing ? "motion-safe:animate-spin" : ""} />
-        </Button>
+        <HoverTip label="Refresh current view" side="bottom">
+          <Button variant="ghost" size="icon-sm" aria-label="Refresh current view"
+            disabled={refreshing} className="text-muted-foreground hover:text-foreground touch:size-10" onClick={async () => {
+              setRefreshing(true);
+              try { await refreshActiveView(); }
+              finally { setRefreshing(false); }
+            }}>
+            <RefreshCw className={refreshing ? "motion-safe:animate-spin" : ""} />
+          </Button>
+        </HoverTip>
         <ThemeToggle />
       </div>
     </header>

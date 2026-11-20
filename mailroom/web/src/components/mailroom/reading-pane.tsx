@@ -1,16 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Archive, ArchiveRestore, ArrowLeft, ChevronsUpDown, Flag, Forward, Mail, MailOpen, MoreHorizontal, Reply, ReplyAll, RotateCcw, Trash2 } from "lucide-react";
+import { AlertTriangle, Archive, ArchiveRestore, ArrowLeft, ChevronDown, ChevronUp, ChevronsUpDown, Flag, Forward, Mail, MailOpen, MoreHorizontal, Reply, ReplyAll, RotateCcw, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { eventTaskId, visibleEvents } from "@/lib/threads";
+import { eventTaskId, matchSnippet, messageHits, visibleEvents } from "@/lib/threads";
 import { fullTime, GOAL_STATE_STYLE, listTime, plainTaskTitle, TYPE_STYLE } from "@/lib/format";
 import type { BusEvent } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { AgentAvatar, Pill, RefChip, RichText, Tip } from "./bits";
+import { AgentAvatar, Highlight, Pill, RefChip, RichText, Tip } from "./bits";
 import { Composer } from "./composer";
 import { useMailroom } from "./context";
 
@@ -40,7 +40,7 @@ function Recipients({ e }: { e: BusEvent }) {
   );
 }
 
-function MessageCard({ e, expanded, onToggle, focused }: { e: BusEvent; expanded: boolean; onToggle: () => void; focused: boolean }) {
+function MessageCard({ e, expanded, onToggle, focused, query }: { e: BusEvent; expanded: boolean; onToggle: () => void; focused: boolean; query: string }) {
   const { agents, ms, mark, startCompose, openHumanIds, taskTags } = useMailroom();
   const taskTag = eventTaskId(e, taskTags);
   const deleted = ms.isDeleted(e);
@@ -49,6 +49,8 @@ function MessageCard({ e, expanded, onToggle, focused }: { e: BusEvent; expanded
   const type = TYPE_STYLE[e.type] ?? TYPE_STYLE.message;
   const sender = e.from === "user" ? "You" : agents.get(e.from)?.name ?? e.from;
   const needs = openHumanIds.has(e.id);
+  const needle = query.trim().toLowerCase();
+  const hit = !!needle && (e.id.toLowerCase() === needle || e.body.toLowerCase().includes(needle));
 
   return (
     <article
@@ -72,7 +74,11 @@ function MessageCard({ e, expanded, onToggle, focused }: { e: BusEvent; expanded
               <span className="text-xs text-muted-foreground">{listTime(e.ts)}</span>
             </Tip>
           </div>
-          {expanded ? <Recipients e={e} /> : <p className="truncate text-xs text-muted-foreground">{e.body.replace(/\s+/g, " ")}</p>}
+          {expanded ? <Recipients e={e} /> : (
+            <p className="truncate text-xs text-muted-foreground">
+              <Highlight text={hit ? matchSnippet(e.body, query, 240) : e.body.replace(/\s+/g, " ")} query={hit ? query : ""} />
+            </p>
+          )}
         </div>
       </header>
       {expanded && (
@@ -83,7 +89,7 @@ function MessageCard({ e, expanded, onToggle, focused }: { e: BusEvent; expanded
                 <AlertTriangle className="size-4 shrink-0" /> {e.from} is waiting for your decision.
               </div>
             )}
-            <RichText text={e.body} />
+            <RichText text={e.body} query={hit ? query : ""} />
             {(e.refs ?? []).length > 0 && (
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {(e.refs ?? []).map((r, i) => (
@@ -156,7 +162,7 @@ function EmptyReading() {
 }
 
 export function ReadingPane() {
-  const { threads, selected, select, folder, ms, mark, compose, startCompose, focusEvent, agents, snap, openGoalTask } = useMailroom();
+  const { threads, selected, select, folder, ms, mark, compose, startCompose, focusEvent, agents, snap, openGoalTask, search } = useMailroom();
   const thread = useMemo(() => threads.find((t) => t.key === selected) ?? null, [threads, selected]);
   const evs = useMemo(() => (thread ? visibleEvents(thread, folder, ms) : []), [thread, folder, ms]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -169,12 +175,24 @@ export function ReadingPane() {
     const open = new Set(v.slice(-2).map((e) => e.id));
     v.filter(ms.isUnread).forEach((e) => open.add(e.id));
     if (focusEvent) open.add(focusEvent);
+    const q = search.trim();
+    if (q) messageHits(v, q).forEach((e) => open.add(e.id));
     setExpanded(open);
     setOlderPages(0);
     setLaterPages(0);
-    // only when the conversation changes, not on every poll
+    // only when the conversation, the focused message, or the search changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [thread?.key, focusEvent]);
+  }, [thread?.key, focusEvent, search]);
+
+  useEffect(() => {
+    const q = search.trim();
+    if (!thread || !q) return;
+    const found = messageHits(visibleEvents(thread, folder, ms), q);
+    if (!found.length || (focusEvent && found.some((e) => e.id === focusEvent))) return;
+    select(thread.key, { focus: found[found.length - 1].id, markRead: false });
+    // jump once when the query or conversation changes, not on every mailbox poll
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, thread?.key, focusEvent]);
 
   useEffect(() => {
     if (focusEvent) setTimeout(() => document.getElementById(`msg-${focusEvent}`)?.scrollIntoView({ block: "center", behavior: "smooth" }), 80);
@@ -210,6 +228,9 @@ export function ReadingPane() {
   const archived = evs.every(ms.isArchived);
   const goalTask = thread.goalTask;
   const taskStyle = goalTask ? GOAL_STATE_STYLE[goalTask.state] : null;
+  const query = search.trim();
+  const hits = query ? messageHits(evs, query) : [];
+  const hitAt = focusEvent ? hits.findIndex((e) => e.id === focusEvent) : -1;
   const focusIndex = focusEvent ? evs.findIndex((e) => e.id === focusEvent) : -1;
   const initialStart = focusIndex >= 0 && focusIndex < evs.length - 6 ? Math.max(0, focusIndex - 3) : Math.max(0, evs.length - 6);
   const start = Math.max(0, initialStart - olderPages * 30);
@@ -280,6 +301,30 @@ export function ReadingPane() {
               </div>
             </div>
           </div>
+          {hits.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-300/80 bg-amber-50 px-2 py-1.5 text-xs dark:border-amber-800 dark:bg-amber-950/40">
+              <span className="min-w-0 flex-1 truncate">
+                <span className="font-medium">{hits.length}</span> {hits.length === 1 ? "message contains" : "messages contain"} “{query}”
+              </span>
+              <Button
+                variant="outline"
+                size="xs"
+                disabled={hitAt <= 0}
+                onClick={() => select(thread.key, { focus: hits[hitAt - 1].id, markRead: false })}
+              >
+                <ChevronUp /> Earlier
+              </Button>
+              <span className="tabular-nums text-muted-foreground">{(hitAt < 0 ? hits.length : hitAt + 1)} of {hits.length}</span>
+              <Button
+                variant="outline"
+                size="xs"
+                disabled={hitAt < 0 || hitAt >= hits.length - 1}
+                onClick={() => select(thread.key, { focus: hits[hitAt + 1].id, markRead: false })}
+              >
+                Later <ChevronDown />
+              </Button>
+            </div>
+          )}
           {start > 0 && (
             <button type="button" onClick={() => setOlderPages((n) => n + 1)} className="w-full rounded-md border border-dashed py-2 text-xs text-muted-foreground hover:bg-muted">
               Load earlier messages ({start})
@@ -290,6 +335,7 @@ export function ReadingPane() {
               key={e.id}
               e={e}
               focused={e.id === focusEvent}
+              query={query}
               expanded={expanded.has(e.id)}
               onToggle={() =>
                 setExpanded((s) => {

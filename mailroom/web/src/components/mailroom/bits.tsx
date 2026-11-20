@@ -144,13 +144,41 @@ export function RefChip({ r }: { r: Ref }) {
 
 const TOKEN = /(\be\d{3,}\b|https?:\/\/[^\s)]+|coordination\/attachments\/[^\s,;)]+|\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b)/g;
 
-export function RichText({ text, className }: { text: string; className?: string }) {
+export function Highlight({ text, query }: { text: string; query: string }) {
+  const needle = query.trim();
+  if (!needle) return <>{text}</>;
+  const lower = text.toLowerCase();
+  const n = needle.toLowerCase();
+  const parts: { text: string; hit: boolean }[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const at = lower.indexOf(n, i);
+    if (at < 0) {
+      parts.push({ text: text.slice(i), hit: false });
+      break;
+    }
+    if (at > i) parts.push({ text: text.slice(i, at), hit: false });
+    parts.push({ text: text.slice(at, at + n.length), hit: true });
+    i = at + n.length;
+  }
+  return (
+    <>
+      {parts.map((part, index) => part.hit ? (
+        <mark key={index} className="rounded-sm bg-amber-300/80 px-0.5 text-foreground dark:bg-amber-400/40">{part.text}</mark>
+      ) : (
+        <Fragment key={index}>{part.text}</Fragment>
+      ))}
+    </>
+  );
+}
+
+export function RichText({ text, className, query = "" }: { text: string; className?: string; query?: string }) {
   const { openEvent, threadByEvent, openFile } = useMailroom();
   const parts = text.split(TOKEN);
   return (
     <div className={cn("text-sm leading-relaxed break-words whitespace-pre-wrap", className)}>
       {parts.map((p, i) => {
-        if (i % 2 === 0) return <Fragment key={i}>{p}</Fragment>;
+        if (i % 2 === 0) return <Highlight key={i} text={p} query={query} />;
         if (/^e\d{3,}$/.test(p)) {
           return threadByEvent.has(p) ? (
             <button key={i} type="button" onClick={() => openEvent(p)} className="rounded px-0.5 font-medium text-primary hover:underline">
