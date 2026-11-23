@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Archive, CheckCheck, Flag, Mail, MailOpen, Menu, Paperclip, RotateCcw, Trash2 } from "lucide-react";
+import { AlertTriangle, Archive, CheckCheck, Flag, Mail, MailOpen, Menu, Paperclip, Pin, RotateCcw, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { lastTs, matchSnippet, messageHits, TASK_FILTERS, threadInFolder, threadMatches, visibleEvents, snippet, type Thread } from "@/lib/threads";
+import { matchSnippet, messageHits, sortFolderThreads, TASK_FILTERS, threadInFolder, threadMatches, visibleEvents, snippet, type Thread } from "@/lib/threads";
 import { GOAL_STATE_STYLE, listTime, plainTaskTitle } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,10 +46,7 @@ export function useFolderThreads(): Thread[] {
     }
     const q = search.trim();
     if (q) list = list.filter((t) => threadMatches(t, q, agents));
-    return list
-      .map((t) => ({ t, ts: lastTs(t, folder, ms) }))
-      .sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0))
-      .map((x) => x.t);
+    return sortFolderThreads(list, folder, ms);
   }, [threads, folder, ms, openHumanIds, search, agents, taskFilter]);
 }
 
@@ -77,6 +74,7 @@ function ThreadRow({ t }: { t: Thread }) {
   const taskTitle = t.goalTask ? plainTaskTitle(t.goalTask.title) : t.subject;
   const title = folder === "tasks" && t.taskId && taskTitle !== t.taskId ? `${t.taskId} · ${taskTitle}` : t.subject;
   const deletedView = folder === "deleted";
+  const pinned = !deletedView && ms.isPinned(t.key);
   const participants = participantsLine(t, evs);
 
   return (
@@ -88,7 +86,7 @@ function ThreadRow({ t }: { t: Thread }) {
       onKeyDown={(e) => e.key === "Enter" && select(t.key, { focus: hits.at(-1)?.id ?? null })}
       className={cn(
         "group relative flex cursor-pointer gap-3 rounded-lg border-b border-l-[3px] border-l-transparent px-3 py-2.5 outline-none transition-colors touch:py-3",
-        sel ? "tool-active" : "hover:bg-muted/60 active:bg-muted",
+        sel ? "tool-active" : cn("hover:bg-muted/60 active:bg-muted", pinned && "bg-amber-500/[0.04] dark:bg-amber-400/[0.06]"),
         unread > 0 && "border-l-primary",
         "focus-visible:ring-2 focus-visible:ring-ring/50",
       )}
@@ -97,7 +95,7 @@ function ThreadRow({ t }: { t: Thread }) {
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
           <span className={cn("min-w-0 flex-1 truncate text-sm", unread ? "font-semibold" : "text-foreground/90")}>{participants}</span>
-          <span className={cn("shrink-0 text-xs tabular-nums [@media(hover:hover)]:group-hover:invisible", unread ? "font-semibold text-primary" : "text-muted-foreground")}>
+          <span className={cn("shrink-0 text-xs tabular-nums [@media(hover:hover)]:group-hover:invisible group-focus-within:invisible", unread ? "font-semibold text-primary" : "text-muted-foreground")}>
             {listTime(preview.ts)}
           </span>
         </div>
@@ -113,6 +111,7 @@ function ThreadRow({ t }: { t: Thread }) {
           ) : evs.length > 1 && <span className="shrink-0 text-xs text-muted-foreground">({evs.length})</span>}
           <span className="ml-auto flex shrink-0 items-center gap-1">
             {hasFiles && <Paperclip className="size-3.5 text-muted-foreground" />}
+            {pinned && <Pin aria-hidden="true" className="size-3.5 fill-amber-500 text-amber-500" />}
             {flagged && <Flag className="size-3.5 fill-red-500 text-red-500" />}
             {taskStyle && <Pill className={taskStyle.cls}>{t.goalTask?.decision ? "USER decision" : taskStyle.label}</Pill>}
             {folder === "tasks" && !t.goalTask && <Pill className="bg-muted text-muted-foreground">Unlinked</Pill>}
@@ -122,7 +121,7 @@ function ThreadRow({ t }: { t: Thread }) {
           {hits.length ? <Highlight text={matchSnippet(preview.body, query)} query={query} /> : snippet(last.body, 220)}
         </p>
       </div>
-      <div className="absolute top-1 right-2 hidden items-center gap-0.5 rounded-lg border bg-background/95 p-0.5 shadow-xs [@media(hover:hover)]:group-hover:flex">
+      <div className="absolute top-1 right-2 hidden items-center gap-0.5 rounded-lg border bg-background/95 p-0.5 shadow-xs [@media(hover:hover)]:group-hover:flex group-focus-within:flex">
         {deletedView ? (
           <QuickAction label="Restore" onClick={() => mark("restore", ids)} icon={RotateCcw} />
         ) : (
@@ -134,6 +133,14 @@ function ThreadRow({ t }: { t: Thread }) {
               icon={unread ? MailOpen : Mail}
             />
             <QuickAction label={flagged ? "Clear flag" : "Flag"} onClick={() => (flagged ? mark("unflag", ids) : mark("flag", [last.id]))} icon={Flag} />
+            <QuickAction
+              label={pinned ? "Unpin" : "Pin"}
+              ariaLabel={`Pin conversation: ${title}`}
+              pressed={pinned}
+              active={pinned}
+              onClick={() => mark(pinned ? "unpin" : "pin", [t.key])}
+              icon={Pin}
+            />
           </>
         )}
       </div>
@@ -141,7 +148,21 @@ function ThreadRow({ t }: { t: Thread }) {
   );
 }
 
-function QuickAction({ label, onClick, icon: Icon }: { label: string; onClick: () => void; icon: typeof Trash2 }) {
+function QuickAction({
+  label,
+  ariaLabel,
+  pressed,
+  active,
+  onClick,
+  icon: Icon,
+}: {
+  label: string;
+  ariaLabel?: string;
+  pressed?: boolean;
+  active?: boolean;
+  onClick: () => void;
+  icon: typeof Trash2;
+}) {
   return (
     <Tooltip>
       <TooltipTrigger
@@ -149,7 +170,9 @@ function QuickAction({ label, onClick, icon: Icon }: { label: string; onClick: (
           <Button
             variant="ghost"
             size="icon-xs"
-            aria-label={label}
+            aria-label={ariaLabel ?? label}
+            aria-pressed={pressed}
+            className={cn(active && "text-amber-600 dark:text-amber-400 [&_svg]:fill-current")}
             onClick={(e) => {
               e.stopPropagation();
               onClick();
@@ -157,7 +180,7 @@ function QuickAction({ label, onClick, icon: Icon }: { label: string; onClick: (
           />
         }
       >
-        <Icon />
+        <Icon aria-hidden="true" />
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
@@ -170,6 +193,7 @@ function ArchiveOlder() {
   const [days, setDays] = useState(30);
   const cutoff = Date.now() - days * 86_400_000;
   const candidates = open ? threads.flatMap((thread) => {
+    if (ms.isPinned(thread.key)) return [];
     if (thread.goalTask ? thread.goalTask.state !== "done" : thread.taskId && thread.task?.state !== "completed") return [];
     const live = visibleEvents(thread, "all", ms);
     const latest = live.at(-1);
@@ -189,7 +213,7 @@ function ArchiveOlder() {
         <AlertDialogHeader>
           <AlertDialogTitle>Archive older conversations</AlertDialogTitle>
           <AlertDialogDescription>
-            Move read conversations to Archive. Flagged conversations, unfinished tasks, and requests awaiting you stay in place.
+            Move read conversations to Archive. Flagged or pinned conversations, unfinished tasks, and requests awaiting you stay in place.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <div className="flex items-center justify-between gap-3 text-sm">
@@ -220,8 +244,13 @@ export function ThreadList() {
 
   useEffect(() => setLimit(PAGE), [folder]);
 
-  const shown = (unreadOnly ? list.filter((t) => t.events.some(ms.isUnread)) : list).slice(0, limit);
+  const filtered = unreadOnly ? list.filter((t) => t.events.some(ms.isUnread)) : list;
+  const shown = filtered.slice(0, limit);
   const unreadTotal = list.reduce((n, t) => n + t.events.filter(ms.isUnread).length, 0);
+  const showPinnedSections = folder !== "deleted" && shown.some((t) => ms.isPinned(t.key));
+  const pinnedShown = showPinnedSections ? shown.filter((t) => ms.isPinned(t.key)) : [];
+  const unpinnedShown = showPinnedSections ? shown.filter((t) => !ms.isPinned(t.key)) : shown;
+  const pinnedTotal = showPinnedSections ? filtered.filter((t) => ms.isPinned(t.key)).length : 0;
 
   useEffect(() => {
     if (!selected) return;
@@ -319,13 +348,29 @@ export function ThreadList() {
             <MailOpen className="size-10 opacity-40" />
             {folder === "inbox" ? "All caught up." : folder === "tasks" ? "No task conversations match this filter." : "Nothing here."}
           </div>
+        ) : showPinnedSections ? (
+          <>
+            <div className="flex items-center gap-1.5 border-b bg-amber-500/[0.05] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+              <Pin aria-hidden="true" className="size-3" />
+              <span>Pinned · {pinnedTotal}</span>
+            </div>
+            {pinnedShown.map((t) => <ThreadRow key={t.key} t={t} />)}
+            {unpinnedShown.length > 0 && (
+              <>
+                <div className="border-b bg-muted/30 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Conversations
+                </div>
+                {unpinnedShown.map((t) => <ThreadRow key={t.key} t={t} />)}
+              </>
+            )}
+          </>
         ) : (
           shown.map((t) => <ThreadRow key={t.key} t={t} />)
         )}
-        {list.length > limit && (
+        {filtered.length > limit && (
           <div className="p-3">
             <Button variant="ghost" className="w-full" onClick={() => setLimit(limit + PAGE)}>
-              Show {Math.min(PAGE, list.length - limit)} more of {list.length - limit}
+              Show {Math.min(PAGE, filtered.length - limit)} more of {filtered.length - limit}
             </Button>
           </div>
         )}

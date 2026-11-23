@@ -119,6 +119,8 @@ const MAILBOX_FEEDBACK = {
   unarchive: "Moved back to conversations",
   flag: "Flag added",
   unflag: "Flag removed",
+  pin: "Conversation pinned",
+  unpin: "Conversation unpinned",
   read_all: "Marked all as read",
 } as const;
 

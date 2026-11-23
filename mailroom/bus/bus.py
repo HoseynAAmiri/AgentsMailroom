@@ -797,6 +797,7 @@ def load_user_state() -> dict[str, Any]:
         st.setdefault(key, [])
     st.setdefault("deleted", {})
     st.setdefault("archived", {})
+    st.setdefault("pinned", {})
     return st
 
 
@@ -842,6 +843,14 @@ def update_user_state(action: str, ids: list[str]) -> dict[str, Any]:
         elif action == "unarchive":
             for i in ids:
                 st["archived"].pop(i, None)
+        elif action == "pin":
+            now = utc_now()
+            for i in ids:
+                if i:
+                    st["pinned"].setdefault(i, now)
+        elif action == "unpin":
+            for i in ids:
+                st["pinned"].pop(i, None)
         else:
             raise ValueError(f"unknown action {action!r}")
         upto = st["read_upto"]

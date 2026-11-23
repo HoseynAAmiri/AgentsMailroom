@@ -20,6 +20,8 @@ export interface MailState {
   isArchived: (e: BusEvent) => boolean;
   isUnread: (e: BusEvent) => boolean;
   isFlagged: (e: BusEvent) => boolean;
+  isPinned: (threadKey: string) => boolean;
+  pinnedAt: (threadKey: string) => string | null;
 }
 
 export function mailState(us: UserState | undefined): MailState {
@@ -28,12 +30,15 @@ export function mailState(us: UserState | undefined): MailState {
   const flagged = new Set(us?.flagged ?? []);
   const deleted = us?.deleted ?? {};
   const archived = us?.archived ?? {};
+  const pinned = us?.pinned ?? {};
   const upto = us?.read_upto ?? 0;
   return {
     isDeleted: (e) => e.id in deleted,
     isArchived: (e) => e.id in archived,
     isUnread: (e) => e.from !== "user" && !(e.id in deleted) && (unread.has(e.id) || (idNum(e.id) > upto && !read.has(e.id))),
     isFlagged: (e) => flagged.has(e.id),
+    isPinned: (threadKey) => Object.hasOwn(pinned, threadKey),
+    pinnedAt: (threadKey) => (Object.hasOwn(pinned, threadKey) ? pinned[threadKey] : null),
   };
 }
 
@@ -171,6 +176,22 @@ export function visibleEvents(t: Thread, folder: FolderId, ms: MailState): BusEv
 export function lastTs(t: Thread, folder: FolderId, ms: MailState): string {
   const v = visibleEvents(t, folder, ms);
   return v.length ? v[v.length - 1].ts : "";
+}
+
+export function sortFolderThreads(list: readonly Thread[], folder: FolderId, ms: MailState): Thread[] {
+  return list
+    .map((t) => ({
+      t,
+      ts: lastTs(t, folder, ms),
+      pin: folder === "deleted" ? null : ms.pinnedAt(t.key),
+    }))
+    .sort((a, b) => {
+      if ((a.pin !== null) !== (b.pin !== null)) return a.pin !== null ? -1 : 1;
+      if (a.ts !== b.ts) return a.ts < b.ts ? 1 : -1;
+      if (a.pin !== b.pin) return (a.pin ?? "") < (b.pin ?? "") ? 1 : -1;
+      return 0;
+    })
+    .map((x) => x.t);
 }
 
 /** Messages whose id or body contains the keyword, in conversation order. */

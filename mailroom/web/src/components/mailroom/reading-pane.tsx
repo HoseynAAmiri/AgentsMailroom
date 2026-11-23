@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Archive, ArchiveRestore, ArrowLeft, ChevronDown, ChevronUp, ChevronsUpDown, Flag, Forward, Mail, MailOpen, MoreHorizontal, Reply, ReplyAll, RotateCcw, Trash2 } from "lucide-react";
+import { AlertTriangle, Archive, ArchiveRestore, ArrowLeft, ChevronDown, ChevronUp, ChevronsUpDown, Flag, Forward, Mail, MailOpen, MoreHorizontal, Pin, Reply, ReplyAll, RotateCcw, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { eventTaskId, matchSnippet, messageHits, visibleEvents } from "@/lib/threads";
 import { fullTime, GOAL_STATE_STYLE, listTime, plainTaskTitle, TYPE_STYLE } from "@/lib/format";
@@ -15,11 +15,25 @@ import { Composer } from "./composer";
 import { useMailroom } from "./context";
 import { MAIL_READING_TOOLBAR_CLS } from "./page-skeletons";
 
-function IconAction({ label, icon: Icon, onClick, className }: { label: string; icon: typeof Reply; onClick: () => void; className?: string }) {
+function IconAction({
+  label,
+  ariaLabel,
+  pressed,
+  icon: Icon,
+  onClick,
+  className,
+}: {
+  label: string;
+  ariaLabel?: string;
+  pressed?: boolean;
+  icon: typeof Reply;
+  onClick: () => void;
+  className?: string;
+}) {
   return (
     <Tooltip>
-      <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label={label} onClick={onClick} className={cn("touch:size-9", className)} />}>
-        <Icon />
+      <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label={ariaLabel ?? label} aria-pressed={pressed} onClick={onClick} className={cn("touch:size-9", className)} />}>
+        <Icon aria-hidden="true" />
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
@@ -231,6 +245,7 @@ export function ReadingPane() {
   const ids = evs.map((e) => e.id);
   const flagged = evs.some(ms.isFlagged);
   const deletedView = folder === "deleted";
+  const pinned = !deletedView && ms.isPinned(thread.key);
   const archived = evs.every(ms.isArchived);
   const goalTask = thread.goalTask;
   const taskStyle = goalTask ? GOAL_STATE_STYLE[goalTask.state] : null;
@@ -275,6 +290,16 @@ export function ReadingPane() {
           <IconAction label="Delete" icon={Trash2} onClick={() => (mark("delete", ids), select(null))} />
         )}
         <IconAction label={flagged ? "Unflag" : "Flag"} icon={Flag} onClick={() => mark(flagged ? "unflag" : "flag", flagged ? ids : [last.id])} className={cn(flagged && "fill-red-500 text-red-500")} />
+        {!deletedView && (
+          <IconAction
+            label={pinned ? "Unpin conversation" : "Pin conversation"}
+            ariaLabel={`Pin conversation: ${thread.subject}`}
+            pressed={pinned}
+            icon={Pin}
+            onClick={() => void mark(pinned ? "unpin" : "pin", [thread.key])}
+            className={cn(pinned && "text-amber-600 dark:text-amber-400 [&_svg]:fill-current")}
+          />
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" className="touch:size-9" aria-label="More" />}>
             <MoreHorizontal />

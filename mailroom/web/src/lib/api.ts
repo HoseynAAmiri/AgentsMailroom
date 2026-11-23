@@ -39,7 +39,7 @@ export const api = {
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
     return data as { name: string; size: number; url: string; ref: string; link_warning?: string; export_warning?: string };
   },
-  userState: (action: "read" | "unread" | "read_all" | "flag" | "unflag" | "delete" | "restore" | "archive" | "unarchive", ids: string[] = []) =>
+  userState: (action: "read" | "unread" | "read_all" | "flag" | "unflag" | "delete" | "restore" | "archive" | "unarchive" | "pin" | "unpin", ids: string[] = []) =>
     post<UserState>("/api/user-state", { action, ids }),
   upsertAgent: (a: Partial<Agent> & { id: string }) => post<Agent>("/api/agents", a),
   setLinks: (links: Link[]) => post<Link[]>("/api/links", { links }),

@@ -276,6 +276,19 @@ class StandaloneSmoke(unittest.TestCase):
                 with self.assertRaises(HTTPError) as bad_preset:
                     read(admin, "/api/agents", post={"id": "role_probe", "role_preset": "not_a_preset"})
                 self.assertEqual(bad_preset.exception.code, 400)
+
+                # Thread pinning persists in user_state.json, works on both ports, is idempotent, and removes on unpin.
+                pinned_state = read(public, "/api/user-state", post={"action": "pin", "ids": ["task:G8.8"]})
+                self.assertIn("task:G8.8", pinned_state["pinned"])
+                pin_ts = pinned_state["pinned"]["task:G8.8"]
+                again_state = read(admin, "/api/user-state", post={"action": "pin", "ids": ["task:G8.8", f"ev:{event_id}"]})
+                self.assertEqual(again_state["pinned"]["task:G8.8"], pin_ts)
+                self.assertIn(f"ev:{event_id}", again_state["pinned"])
+                snap_pinned = read(admin, "/api/snapshot")
+                self.assertIn("task:G8.8", snap_pinned["user_state"]["pinned"])
+                unpinned_state = read(admin, "/api/user-state", post={"action": "unpin", "ids": ["task:G8.8"]})
+                self.assertNotIn("task:G8.8", unpinned_state["pinned"])
+                self.assertIn(f"ev:{event_id}", unpinned_state["pinned"])
             finally:
                 server.terminate()
                 try:
