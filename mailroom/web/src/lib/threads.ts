@@ -159,6 +159,11 @@ export function threadInFolder(t: Thread, folder: FolderId, ctx: FolderCtx): boo
   }
 }
 
+/** Threads that appear in the "Needs you" folder (respecting deleted messages). */
+export function openHumanThreads(threads: readonly Thread[], ctx: FolderCtx): Thread[] {
+  return threads.filter((t) => threadInFolder(t, "needs", ctx));
+}
+
 export function visibleEvents(t: Thread, folder: FolderId, ms: MailState): BusEvent[] {
   return folder === "deleted" ? t.events.filter(ms.isDeleted) : t.events.filter((e) => !ms.isDeleted(e));
 }

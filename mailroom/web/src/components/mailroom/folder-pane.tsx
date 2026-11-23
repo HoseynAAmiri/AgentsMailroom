@@ -94,7 +94,7 @@ export function FolderPane() {
       && t.goalTask && (t.goalTask.state === "blocked" || (t.goalTask.state !== "done" && t.goalTask.decision))).length;
     return {
       inbox: unreadIn("inbox"),
-      needs: openHumanIds.size,
+      needs: totalIn("needs"),
       flagged: totalIn("flagged"),
       sent: totalIn("sent"),
       all: unreadIn("all"),
@@ -103,7 +103,7 @@ export function FolderPane() {
       deleted: totalIn("deleted"),
       status: events.filter((e) => e.type === "agent.status").length,
     };
-  }, [threads, ctx, ms, openHumanIds, events]);
+  }, [threads, ctx, ms, events]);
 
   const registry = snap?.agents ?? [];
   const team = registry.filter((a) => (a.kind ?? "permanent") === "permanent" && !a.id.includes("."));

@@ -111,7 +111,7 @@ function ThemeToggle() {
 }
 
 function TopBar() {
-  const { connected, error, snap, search, setSearch, refreshActiveView, openHuman, setFolder, view } = useMailroom();
+  const { connected, error, snap, search, setSearch, refreshActiveView, needsThreadCount, setFolder, view } = useMailroom();
   const [refreshing, setRefreshing] = useState(false);
   const ref = useRef<HTMLInputElement>(null);
   const mem = snap?.memory && "avail_gib" in snap.memory ? snap.memory : null;
@@ -158,15 +158,15 @@ function TopBar() {
         )}
       </div>
       <div className="flex shrink-0 items-center justify-self-end gap-1 sm:gap-2">
-        {openHuman.length > 0 && (
-          <Tip label={`${openHuman.length} waiting on you`} side="bottom">
+        {needsThreadCount > 0 && (
+          <Tip label={`${needsThreadCount} ${needsThreadCount === 1 ? "thread" : "threads"} waiting on you`} side="bottom">
             <button
               type="button"
               onClick={() => setFolder("needs")}
               aria-label="Waiting on you"
               className="inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/15 px-1.5 text-xs font-semibold tabular-nums text-amber-700 hover:bg-amber-500/25 dark:text-amber-300 sm:w-14 sm:px-0 touch:h-9"
             >
-              <AlertTriangle className="size-3.5 shrink-0" /> {openHuman.length > 99 ? "99+" : openHuman.length}
+              <AlertTriangle className="size-3.5 shrink-0" /> {needsThreadCount > 99 ? "99+" : needsThreadCount}
             </button>
           </Tip>
         )}

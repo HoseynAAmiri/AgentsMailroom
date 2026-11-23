@@ -330,7 +330,7 @@ function AgentCard({ a, subs, onEdit, onConnect, onSession }: { a: Agent; subs: 
 }
 
 function HealthStrip() {
-  const { snap, openHuman, setFolder, setView, lastActivity, activityNow } = useMailroom();
+  const { snap, needsThreadCount, setFolder, setView, lastActivity, activityNow } = useMailroom();
   const agents = (snap?.agents ?? []).filter((a) => !a.id.includes(".") && !a.retired && !(a.kind === "temporary" && ENDED.includes(a.state ?? "")));
   const pres = snap?.presence ?? {};
   const conns = agents.map((a) =>
@@ -357,14 +357,14 @@ function HealthStrip() {
       </div>
       <button
         type="button"
-        className={cn(tile, "hover:bg-muted", openHuman.length && "border-amber-300 dark:border-amber-800")}
+        className={cn(tile, "hover:bg-muted", needsThreadCount && "border-amber-300 dark:border-amber-800")}
         onClick={() => {
           setView("mail");
           setFolder("needs");
         }}
       >
         <div className="text-xs text-muted-foreground">Waiting on you</div>
-        <div className={cn("mt-1 text-2xl font-semibold tabular-nums", openHuman.length && "text-amber-600")}>{openHuman.length}</div>
+        <div className={cn("mt-1 text-2xl font-semibold tabular-nums", needsThreadCount && "text-amber-600")}>{needsThreadCount}</div>
       </button>
       <div className={cn(tile, "order-last col-span-2 sm:order-none sm:col-span-2 lg:col-span-1", notReading.length && "border-amber-300 dark:border-amber-800")}>
         <div className="text-xs text-muted-foreground">Not reading / unreachable</div>

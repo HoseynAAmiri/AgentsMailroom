@@ -10,6 +10,7 @@ import {
   eventTaskId,
   mailState,
   openHumanRequests,
+  openHumanThreads,
   snippet,
   type FolderId,
   type MailState,
@@ -51,6 +52,7 @@ interface Ctx {
   threadByEvent: Map<string, Thread>;
   openHuman: BusEvent[];
   openHumanIds: Set<string>;
+  needsThreadCount: number;
   view: View;
   setView: (v: View) => void;
   folder: FolderId;
@@ -207,6 +209,10 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
   }, [threads]);
   const openHuman = useMemo(() => openHumanRequests(events), [events]);
   const openHumanIds = useMemo(() => new Set(openHuman.map((e) => e.id)), [openHuman]);
+  const needsThreadCount = useMemo(
+    () => openHumanThreads(threads, { ms, openHuman: openHumanIds, agents }).length,
+    [threads, ms, openHumanIds, agents],
+  );
 
   const mark = useCallback(
     async (action: Parameters<Ctx["mark"]>[0], ids: string[]) => {
@@ -419,6 +425,7 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
     threadByEvent,
     openHuman,
     openHumanIds,
+    needsThreadCount,
     view,
     setView,
     folder,
