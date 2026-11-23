@@ -270,6 +270,7 @@ class G61TaggingAndBackfillTest(unittest.TestCase):
             )
             doc_tags = json.loads(probe.stdout)
             self.assertEqual(doc_tags["coordination/attachments/post_bare.md"], "G8.8")
+            self.assertEqual(doc_tags["coordination/attachments/post_retired.md"], "G5.8")
             self.assertEqual(doc_tags["docs/goals-and-tasks/G8/g8_8_followups/context.md"], "G8.8")
             self.assertEqual(doc_tags["docs/goals-and-tasks/G5/g5_8_matched_ca/work_order.md"], "G5.8")
             self.assertFalse(any("_templates" in k for k in doc_tags))
@@ -291,16 +292,16 @@ class G61TaggingAndBackfillTest(unittest.TestCase):
             self.assertEqual(dry_json["attachment_counts"]["pre_cutover_attachments_untouched"], 1)
             self.assertEqual(dry_json["attachment_counts"]["post_attach_bare_active_resolved_by_item3"], 1)
             self.assertEqual(dry_json["attachment_counts"]["post_attach_rescued_by_event_tag_backfill"], 1)
-            self.assertEqual(dry_json["attachment_counts"]["post_attach_retired_g8_6_frontmatter_to_g5_8"], 1)
+            self.assertEqual(dry_json["attachment_counts"]["post_attach_retired_g8_6_resolved_by_alias"], 1)
 
             with sqlite3.connect(store / "todo" / "tasks.sqlite3") as conn:
                 self.assertEqual(conn.execute("SELECT COUNT(*) FROM tags").fetchone()[0], 0)
             self.assertIn("task_id: G8.6", pre_md.read_text(encoding="utf-8"))
             self.assertIn("task_id: G8.6", post_ret.read_text(encoding="utf-8"))
 
-            # Apply SQLite tags + attachment front-matter update; confirm pre-cutover stays untouched.
+            # Apply SQLite tags only; confirm BOTH pre-cutover and write-once post_retired.md stay untouched on disk.
             subprocess.run(
-                [sys.executable, str(BACKFILL_PY), "--apply", "--apply-attachments", "--json"],
+                [sys.executable, str(BACKFILL_PY), "--apply", "--json"],
                 env=env,
                 capture_output=True,
                 text=True,
@@ -310,7 +311,7 @@ class G61TaggingAndBackfillTest(unittest.TestCase):
                 tags = dict(conn.execute("SELECT event_id, task_id FROM tags"))
             self.assertEqual(tags, {"e003": "G5.8", "e004": "G5.8", "e006": "G5.8"})
             self.assertIn("task_id: G8.6", pre_md.read_text(encoding="utf-8"))
-            self.assertIn("task_id: G5.8", post_ret.read_text(encoding="utf-8"))
+            self.assertIn("task_id: G8.6", post_ret.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

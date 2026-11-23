@@ -150,6 +150,14 @@ def todo_mutation(values, *, admin: bool):
 _TASK_ID_LINE_RE = re.compile(r"^task_id:[ \t]*['\"]?(G[1-9]\d*\.[1-9]\d*)['\"]?[ \t]*\r?$", re.M)
 _DOC_GOAL_SLUG_RE = re.compile(r"^docs/goals-and-tasks/(G[1-9]\d*)/([^/]+)/")
 _SLUG_TASK_RE = re.compile(r"^(?:(G[1-9]\d*\.[1-9]\d*)|g([1-9]\d*)_([1-9]\d*)(?:_|$))")
+RETIRED_TASK_ALIASES: dict[str, str] = {"G8.6": "G5.8"}
+
+
+def _resolve_task_alias(task_id: str | None) -> str | None:
+    """Resolve moved/retired task aliases at read time without editing write-once files."""
+    if task_id in RETIRED_TASK_ALIASES:
+        return RETIRED_TASK_ALIASES[task_id]
+    return task_id
 
 
 def _infer_doc_task_id(label: str) -> str | None:
@@ -260,6 +268,7 @@ def todo_documents(window: int):
             task = todo_file_tag(path, stat.st_mtime_ns, stat.st_size) if path.suffix.lower() == ".md" else None
             if task is None:
                 task = _infer_doc_task_id(label)
+            task = _resolve_task_alias(task)
         except OSError:
             continue
         files.append((label, task, stat.st_mtime))

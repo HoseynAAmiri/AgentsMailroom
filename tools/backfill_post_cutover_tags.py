@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Scoped post-cutover task-ID backfill for Mailroom SQLite tags and .md attachments.
+"""Scoped post-cutover task-ID backfill for Mailroom SQLite tags.
 
-Leaves all pre-cutover history (`id <= cutover` or attachment `mtime <= cutover_time`)
-untouched. Defaults to `--dry-run` and never modifies files or SQLite unless `--apply`
-is passed explicitly.
+Leaves all pre-cutover history (`id <= cutover` or attachment `mtime <= cutover_time`),
+append-only `events.jsonl`, and write-once attachment files untouched. Defaults to
+`--dry-run` and never modifies SQLite unless `--apply` is passed explicitly.
 """
 
 from __future__ import annotations
@@ -33,7 +33,6 @@ RETIRED_TASK_REMAP = {
 }
 _YAML_FRONT_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---(?:\r?\n|$)", re.S)
 _BARE_TASK_LINE_RE = re.compile(r"^task_id:[ \t]*['\"]?([^\s'\"]+)['\"]?[ \t]*\r?$", re.M)
-_RETIRED_OR_GOAL_LINE_RE = re.compile(r"^(task_id:[ \t]*['\"]?)([^\s'\"]+)(['\"]?[ \t]*\r?)$", re.M)
 
 
 def _load_tracker_snapshot() -> tuple[dict[str, Any], set[str], set[str], dict[str, str]]:
@@ -260,12 +259,12 @@ def compute_plan() -> dict[str, Any]:
         "post_cutover_attachments_total": len(post_attach),
         "post_attach_yaml_active": 0,
         "post_attach_bare_active_resolved_by_item3": 0,
-        "post_attach_retired_g8_6_frontmatter_to_g5_8": 0,
+        "post_attach_retired_g8_6_resolved_by_alias": 0,
         "post_attach_rescued_by_event_tag_backfill": 0,
         "post_attach_already_covered_by_event_or_link": 0,
         "post_attach_remaining_untagged": 0,
     }
-    proposed_attach_frontmatter: list[dict[str, Any]] = []
+    alias_resolved_attachments: list[dict[str, Any]] = []
     remaining_untagged_attach: list[dict[str, Any]] = []
 
     for p in post_attach:
@@ -280,14 +279,14 @@ def compute_plan() -> dict[str, Any]:
             continue
         if tag_val in RETIRED_TASK_REMAP and RETIRED_TASK_REMAP[tag_val] in active:
             target = RETIRED_TASK_REMAP[tag_val]
-            attach_counts["post_attach_retired_g8_6_frontmatter_to_g5_8"] += 1
-            proposed_attach_frontmatter.append(
+            attach_counts["post_attach_retired_g8_6_resolved_by_alias"] += 1
+            alias_resolved_attachments.append(
                 {
                     "path": label,
-                    "old_tag": tag_val,
-                    "new_tag": target,
+                    "front_matter_tag": tag_val,
+                    "resolved_tag": target,
                     "format": fmt,
-                    "reason": "retired_remap:G8.6->G5.8",
+                    "reason": "read_time_alias:G8.6->G5.8",
                 }
             )
             continue
@@ -336,14 +335,14 @@ def compute_plan() -> dict[str, Any]:
         "attachment_counts": attach_counts,
         "docs_counts": docs_count,
         "proposed_event_tags": list(proposed_event_tags.values()),
-        "proposed_attachment_frontmatter_updates": proposed_attach_frontmatter,
+        "alias_resolved_attachments": alias_resolved_attachments,
         "remaining_untagged_non_status_sample": remaining_untagged_non_status[:25],
         "remaining_untagged_attachments": remaining_untagged_attach,
         "remaining_untagged_docs": remaining_untagged_docs,
     }
 
 
-def apply_plan(plan: dict[str, Any], *, apply_attachments: bool = False) -> dict[str, Any]:
+def apply_plan(plan: dict[str, Any]) -> dict[str, Any]:
     store = bus.todo_store()
     rows = [
         (item["event_id"], item["new_task_id"])
@@ -357,34 +356,19 @@ def apply_plan(plan: dict[str, Any], *, apply_attachments: bool = False) -> dict
             rows,
         )
         conn.execute("UPDATE metadata SET revision=revision+1, updated=? WHERE singleton=1", (todo_store.now(),))
-    updated_files = 0
-    if apply_attachments:
-        for item in plan["proposed_attachment_frontmatter_updates"]:
-            rel = item["path"].removeprefix("coordination/attachments/")
-            target_file = bus.ATTACH_DIR / rel
-            if not target_file.is_file():
-                continue
-            text = target_file.read_text(encoding="utf-8", errors="replace")
-            new_text, n = _RETIRED_OR_GOAL_LINE_RE.subn(
-                rf"\g<1>{item['new_tag']}\g<3>", text, count=1
-            )
-            if n:
-                target_file.write_text(new_text, encoding="utf-8")
-                updated_files += 1
-    return {"sqlite_tags_written": len(rows), "attachment_files_updated": updated_files}
+    return {"sqlite_tags_written": len(rows)}
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--dry-run", action="store_true", help="Report planned backfill without modifying files or SQLite (default).")
-    mode.add_argument("--apply", action="store_true", help="Write scoped post-cutover SQLite tag overrides.")
-    parser.add_argument("--apply-attachments", action="store_true", help="With --apply, also update retired G8.6 front-matter lines in post-cutover .md attachments.")
+    mode.add_argument("--dry-run", action="store_true", help="Report planned backfill without modifying SQLite (default).")
+    mode.add_argument("--apply", action="store_true", help="Write scoped post-cutover SQLite tag overrides (never modifies attachments or events.jsonl).")
     parser.add_argument("--json", action="store_true", help="Emit JSON output.")
     args = parser.parse_args(argv)
 
     plan = compute_plan()
-    applied = apply_plan(plan, apply_attachments=args.apply_attachments) if args.apply else None
+    applied = apply_plan(plan) if args.apply else None
     if args.json:
         out = {**plan}
         if applied is not None:
@@ -411,7 +395,7 @@ def main(argv: list[str] | None = None) -> int:
             f"post={ac['post_cutover_attachments_total']}, "
             f"bare_item3={ac['post_attach_bare_active_resolved_by_item3']}, "
             f"rescued_by_event={ac['post_attach_rescued_by_event_tag_backfill']}, "
-            f"retired_fm_to_g5_8={ac['post_attach_retired_g8_6_frontmatter_to_g5_8']}, "
+            f"retired_alias_to_g5_8={ac['post_attach_retired_g8_6_resolved_by_alias']}, "
             f"remaining_untagged={ac['post_attach_remaining_untagged']}"
         )
         print(
@@ -422,7 +406,7 @@ def main(argv: list[str] | None = None) -> int:
             f"remaining_untagged={dc['docs_remaining_untagged']}"
         )
         if applied is not None:
-            print(f"Applied: sqlite_tags={applied['sqlite_tags_written']}, files={applied['attachment_files_updated']}")
+            print(f"Applied: sqlite_tags={applied['sqlite_tags_written']}")
     return 0
 
 
