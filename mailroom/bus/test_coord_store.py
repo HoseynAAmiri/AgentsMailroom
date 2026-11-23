@@ -256,9 +256,9 @@ class BoundaryAndDefaultsTest(unittest.TestCase):
 
         for _ in range(80):
             try:
-                urlopen(f"http://127.0.0.1:{admin}/api/snapshot", timeout=1).read()
+                urlopen(f"http://127.0.0.1:{admin}/api/snapshot", timeout=3).read()
                 break
-            except URLError:
+            except (URLError, TimeoutError):
                 time.sleep(0.05)
         else:
             self.fail("bus server failed to start")

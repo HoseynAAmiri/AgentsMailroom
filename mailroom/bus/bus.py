@@ -147,6 +147,74 @@ def todo_mutation(values, *, admin: bool):
     return store.mutate(values, editor, set(agents))
 
 
+_TASK_ID_LINE_RE = re.compile(r"^task_id:[ \t]*['\"]?(G[1-9]\d*\.[1-9]\d*)['\"]?[ \t]*\r?$", re.M)
+_DOC_GOAL_SLUG_RE = re.compile(r"^docs/goals-and-tasks/(G[1-9]\d*)/([^/]+)/")
+_SLUG_TASK_RE = re.compile(r"^(?:(G[1-9]\d*\.[1-9]\d*)|g([1-9]\d*)_([1-9]\d*)(?:_|$))")
+
+
+def _infer_doc_task_id(label: str) -> str | None:
+    """Infer G<goal>.<sub> from docs/goals-and-tasks/G<n>/<slug>/ path when present."""
+    match = _DOC_GOAL_SLUG_RE.match(label)
+    if not match:
+        return None
+    goal_dir, slug = match.group(1), match.group(2)
+    if slug == "_templates" or slug.startswith("."):
+        return None
+    slug_match = _SLUG_TASK_RE.match(slug)
+    if not slug_match:
+        return None
+    if slug_match.group(1):
+        tid = slug_match.group(1)
+    else:
+        tid = f"G{slug_match.group(2)}.{slug_match.group(3)}"
+    return tid if tid.startswith(f"{goal_dir}.") else None
+
+
+def _tracker_task_state() -> tuple[set[str], set[str], dict[str, str]] | None:
+    """Return (active_ids, retired_ids, tag_overrides) from SQLite when seeded, else None."""
+    from contextlib import closing
+    try:
+        store = todo_store()
+        if not store.initialized():
+            return None
+        with closing(store.connect()) as conn:
+            has_tasks = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='tasks'"
+            ).fetchone()
+            if not has_tasks:
+                return None
+            rows = conn.execute(
+                "SELECT tasks.id, tasks.removed, goals.removed "
+                "FROM tasks JOIN goals ON goals.id = tasks.goal_id"
+            ).fetchall()
+            tags = dict(conn.execute("SELECT event_id, task_id FROM tags"))
+    except Exception:
+        return None
+    active = {row[0] for row in rows if not row[1] and not row[2]}
+    retired = {row[0] for row in rows if row[0] not in active}
+    return active, retired, tags
+
+
+def _task_id_warning(event: dict[str, Any]) -> str | None:
+    """Return a non-blocking validation warning when a post lacks an active G#.# task_id."""
+    if event.get("type") == "agent.status" and event.get("state") == "offline":
+        return None
+    state = _tracker_task_state()
+    if state is None:
+        return None
+    active, retired, _ = state
+    tid = str(event.get("task_id") or "").strip()
+    if tid in active:
+        return None
+    kind = str(event.get("type") or "message")
+    eid = str(event.get("id") or "event")
+    if tid in retired:
+        return f"warning: {kind} {eid} uses retired task_id {tid!r} (removed in tracker); use an active G#.# task ID."
+    if tid:
+        return f"warning: {kind} {eid} task_id {tid!r} is not an active G#.# task ID in tracker."
+    return f"warning: {kind} {eid} has no active G#.# task_id; pass --task-id <G#.#>."
+
+
 @lru_cache(maxsize=1024)
 def todo_file_tag(path: Path, mtime_ns: int, size: int) -> str | None:
     try:
@@ -155,9 +223,21 @@ def todo_file_tag(path: Path, mtime_ns: int, size: int) -> str | None:
     except OSError:
         return None
     front = re.match(r"\A---\r?\n(.*?)\r?\n---(?:\r?\n|$)", header, re.S)
-    match = re.search(r"^task_id:[ \t]*['\"]?(G[1-9]\d*\.[1-9]\d*)['\"]?[ \t]*\r?$",
-                      front[1], re.M) if front else None
-    return match[1] if match else None
+    if front:
+        match = _TASK_ID_LINE_RE.search(front[1])
+        return match[1] if match else None
+    lead_lines = []
+    for line in header.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            break
+        lead_lines.append(line)
+        if len(lead_lines) >= 8:
+            break
+    if lead_lines:
+        match = _TASK_ID_LINE_RE.search("\n".join(lead_lines))
+        return match[1] if match else None
+    return None
 
 
 @lru_cache(maxsize=2)
@@ -168,7 +248,7 @@ def todo_documents(window: int):
     paths = [(ATTACH_DIR / row["name"], f"coordination/attachments/{row['name']}", ATTACH_DIR)
              for row in attachments_list(limit=5000)]
     for directory, names, children in os.walk(docs):
-        names[:] = [name for name in names if not name.startswith(".") and name != "archive"]
+        names[:] = [name for name in names if not name.startswith(".") and name not in {"archive", "_templates"}]
         paths.extend((path, path.relative_to(REPO_DIR).as_posix(), docs)
                      for child in children if child.endswith(".md") and not child.startswith(".")
                      and child != "GOALS_STATUS.md" for path in (Path(directory) / child,))
@@ -178,6 +258,8 @@ def todo_documents(window: int):
                 continue
             stat = path.stat()
             task = todo_file_tag(path, stat.st_mtime_ns, stat.st_size) if path.suffix.lower() == ".md" else None
+            if task is None:
+                task = _infer_doc_task_id(label)
         except OSError:
             continue
         files.append((label, task, stat.st_mtime))
@@ -631,6 +713,32 @@ def route_error(event: dict[str, Any], data: dict[str, Any] | None = None) -> st
     return None
 
 
+def _inherit_reply_task_id(parent_id: str) -> str | None:
+    """Resolve an ancestor task_id along in_reply_to while _EVENT_INDEX.lock is held."""
+    state = _tracker_task_state()
+    active = state[0] if state is not None else None
+    tag_overrides = state[2] if state is not None else {}
+    cur = parent_id
+    visited: set[str] = set()
+    first_nonempty: str | None = None
+    while cur and cur not in visited:
+        visited.add(cur)
+        pos = _EVENT_INDEX.positions.get(cur)
+        if pos is None:
+            break
+        ev = _EVENT_INDEX.events[pos]
+        cand = str(tag_overrides.get(cur) or ev.get("task_id") or "").strip()
+        if cand:
+            if active is None:
+                return cand
+            if cand in active:
+                return cand
+            if first_nonempty is None:
+                first_nonempty = cand
+        cur = str(ev.get("in_reply_to") or "").strip()
+    return first_nonempty
+
+
 def append_event(event: dict[str, Any], check_route: bool = True) -> dict[str, Any]:
     for key in ("cc", "subject", "in_reply_to"):
         if not event.get(key):
@@ -645,6 +753,10 @@ def append_event(event: dict[str, Any], check_route: bool = True) -> dict[str, A
     with bus_lock():
         with _EVENT_INDEX.lock:
             _EVENT_INDEX.refresh()
+            if not str(event.get("task_id") or "").strip() and event.get("in_reply_to"):
+                inherited = _inherit_reply_task_id(str(event["in_reply_to"]).strip())
+                if inherited:
+                    event["task_id"] = inherited
             if not event.get("id") or event["id"] in _EVENT_INDEX.positions:
                 event["id"] = f"e{_EVENT_INDEX.max_id + 1:03d}"
         with EVENTS_PATH.open("a", encoding="utf-8") as f:
@@ -1720,6 +1832,9 @@ def cmd_post(args: argparse.Namespace) -> int:
     except PermissionError as exc:
         print(str(exc), file=sys.stderr)
         return 3
+    warn = _task_id_warning(event)
+    if warn:
+        print(warn, file=sys.stderr)
     print(json.dumps(event, indent=2))
     return 0
 
@@ -1738,6 +1853,9 @@ def cmd_status(args: argparse.Namespace) -> int:
         "refs": [],
     }
     append_event(event)
+    warn = _task_id_warning(event)
+    if warn:
+        print(warn, file=sys.stderr)
     print(json.dumps(event, indent=2))
     return 0
 
@@ -2015,11 +2133,13 @@ class BusHandler(SimpleHTTPRequestHandler):
             self.send_header("Pragma", "no-cache")
         super().end_headers()
 
-    def _send_json(self, code: int, payload: Any) -> None:
+    def _send_json(self, code: int, payload: Any, headers: dict[str, str] | None = None) -> None:
         raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Vary", "Accept-Encoding")
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
         if supports_gzip(self.headers.get("Accept-Encoding", "")) and len(raw) >= 1024:
             packed = gzip.compress(raw, compresslevel=3, mtime=0)
             if len(packed) < len(raw):
@@ -2318,7 +2438,8 @@ class BusHandler(SimpleHTTPRequestHandler):
             except PermissionError as exc:
                 self._send_json(403, {"error": str(exc)})
                 return
-            self._send_json(201, event)
+            warn = _task_id_warning(event)
+            self._send_json(201, event, headers={"X-Mailroom-Warning": warn} if warn else None)
             return
 
         if parsed.path == "/api/mark-seen":
