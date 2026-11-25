@@ -80,7 +80,7 @@ export function RecipientPicker({
           >
             <Plus className="size-3.5" /> {value.length && !multiple ? "Change" : "Add"}
           </PopoverTrigger>
-          <PopoverContent className="w-[min(20rem,calc(100vw-2rem))] max-h-(--available-height) overflow-hidden p-0" align="start">
+          <PopoverContent className="w-[min(20rem,calc(100dvw-2rem))] max-h-(--available-height) overflow-hidden p-0" align="start">
             <Command>
               <CommandInput placeholder="Find an agent…" />
               <CommandList>

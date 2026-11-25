@@ -129,17 +129,17 @@ export function RefChip({ r }: { r: Ref }) {
         {inner}
       </a>
     ) : (
-      <span title={r.value} className="inline-flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
+      <span title={r.value} className="inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
         {inner}
       </span>
     );
   }
   const Icon = r.kind === "commit" ? GitCommit : Hash;
   return (
-    <span className="inline-flex items-center gap-1 rounded-md border bg-muted/40 px-2 py-1 font-mono text-xs text-muted-foreground">
-      <Icon className="size-3" />
-      {r.kind !== "commit" && <span className="font-sans">{r.kind}:</span>}
-      {r.value}
+    <span title={r.value} className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-md border bg-muted/40 px-2 py-1 font-mono text-xs text-muted-foreground">
+      <Icon className="size-3 shrink-0" />
+      {r.kind !== "commit" && <span className="shrink-0 font-sans">{r.kind}:</span>}
+      <span className="min-w-0 truncate">{r.value}</span>
     </span>
   );
 }

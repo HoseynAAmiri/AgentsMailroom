@@ -113,7 +113,7 @@ function MessageCard({ e, expanded, onToggle, focused, query }: { e: BusEvent; e
               </div>
             )}
           </div>
-          <footer className="flex items-center gap-0.5 border-t px-1.5 py-1.5 sm:gap-1 sm:px-3 sm:pl-[56px]">
+          <footer className="flex flex-wrap items-center gap-0.5 border-t px-1.5 py-1.5 sm:gap-1 sm:px-3 sm:pl-[56px]">
             <Button variant="ghost" size="sm" aria-label="Reply" onClick={() => startCompose("reply", e)}>
               <Reply /> <span className="hidden sm:inline">Reply</span>
             </Button>
@@ -275,10 +275,10 @@ export function ReadingPane() {
         <Button variant="ghost" size="icon-sm" aria-label="Back to list" className="md:hidden touch:size-9" onClick={() => select(null)}>
           <ArrowLeft />
         </Button>
-        <div className="ml-auto flex items-center gap-0.5">
+        <div className="ml-auto flex min-w-0 flex-wrap items-center gap-0.5">
         <IconAction label="Reply" icon={Reply} onClick={() => startCompose("reply", last)} />
-        <IconAction label="Reply all" icon={ReplyAll} onClick={() => startCompose("replyAll", last)} />
-        <IconAction label="Forward" icon={Forward} onClick={() => startCompose("forward", last)} />
+        <IconAction label="Reply all" icon={ReplyAll} onClick={() => startCompose("replyAll", last)} className="hidden sm:inline-flex" />
+        <IconAction label="Forward" icon={Forward} onClick={() => startCompose("forward", last)} className="hidden sm:inline-flex" />
         <div className="mx-1 h-5 w-px bg-border" />
         {!deletedView && snap?.capabilities?.admin && (
           <IconAction label={archived ? "Unarchive conversation" : "Archive conversation"} icon={archived ? ArchiveRestore : Archive}
@@ -305,6 +305,13 @@ export function ReadingPane() {
             <MoreHorizontal />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuItem className="sm:hidden" onClick={() => startCompose("replyAll", last)}>
+              <ReplyAll /> Reply all
+            </DropdownMenuItem>
+            <DropdownMenuItem className="sm:hidden" onClick={() => startCompose("forward", last)}>
+              <Forward /> Forward
+            </DropdownMenuItem>
+            <DropdownMenuSeparator className="sm:hidden" />
             <DropdownMenuItem onClick={() => mark("unread", [last.id])}>
               <Mail /> Mark as unread
             </DropdownMenuItem>

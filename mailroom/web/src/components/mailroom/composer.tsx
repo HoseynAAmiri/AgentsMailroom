@@ -108,7 +108,7 @@ export function Composer({ inline }: { inline?: boolean }) {
             if (open && !taskChoices) void api.goalChoices().then((data) => setTaskChoices(data.tasks)).catch(() => setTaskChoices([]));
           }}>
             <PopoverTrigger render={<Button size="icon-sm" variant="ghost" className="shrink-0 touch:size-9" aria-label="Choose a task"><Tag /></Button>} />
-            <PopoverContent align="end" className="w-[min(23rem,calc(100vw-1.5rem))] max-h-(--available-height) overflow-hidden p-0">
+            <PopoverContent align="end" className="w-[min(23rem,calc(100dvw-1.5rem))] max-h-(--available-height) overflow-hidden p-0">
               <Command>
                 <CommandInput placeholder="Find a task…" />
                 <CommandList>

@@ -53,7 +53,7 @@ function AvatarColorPicker({ agent }: { agent: Agent }) {
           </Button>
         }
       />
-      <PopoverContent className="w-[min(21rem,calc(100vw-1.5rem))]" align="start">
+      <PopoverContent className="w-[min(21rem,calc(100dvw-1.5rem))]" align="start">
         <div className="flex items-center gap-2">
           <AgentAvatar id={agent.id} size="sm" />
           <PopoverTitle>Avatar color · {agent.name}</PopoverTitle>

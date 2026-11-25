@@ -57,7 +57,7 @@ export function SearchableSelect<Value extends string>({
       </Combobox.Trigger>
       <Combobox.Portal>
         <Combobox.Positioner sideOffset={5} align={compact ? "end" : "start"} className="z-50">
-          <Combobox.Popup className="flex max-h-(--available-height) w-[max(15rem,var(--anchor-width))] max-w-[min(var(--available-width),calc(100vw-1.5rem))] flex-col overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-md">
+          <Combobox.Popup className="flex max-h-(--available-height) w-[max(15rem,var(--anchor-width))] max-w-[min(var(--available-width),calc(100dvw-1.5rem))] flex-col overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-md">
             <div className="flex shrink-0 items-center gap-2 border-b px-3">
               <Search aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
               <Combobox.Input

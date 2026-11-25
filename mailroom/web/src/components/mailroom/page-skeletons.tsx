@@ -18,7 +18,7 @@ export {
 };
 
 export const MAIL_THREAD_LIST_HEADER_CLS = "flex items-center gap-1.5 border-b px-2.5 py-2 sm:gap-2 sm:px-3 sm:py-2.5";
-export const MAIL_READING_TOOLBAR_CLS = "flex items-center gap-0.5 border-b px-1.5 py-1 sm:px-3 sm:py-1.5";
+export const MAIL_READING_TOOLBAR_CLS = "flex min-w-0 flex-wrap items-center gap-0.5 border-b px-1.5 py-1 sm:px-3 sm:py-1.5";
 export const STATUS_HEADER_CLS = "border-b px-3 py-2 sm:px-4 sm:py-2.5";
 
 export const GOALS_HEADER_CLS = "flex min-h-11 shrink-0 flex-wrap items-center gap-2 border-b bg-card/40 px-3 py-1.5 sm:min-h-12 sm:px-5";
