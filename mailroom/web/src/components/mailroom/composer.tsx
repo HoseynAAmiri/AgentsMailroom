@@ -149,7 +149,7 @@ export function Composer({ inline }: { inline?: boolean }) {
           ))}
         </div>
       )}
-      <div className="flex items-center gap-2 border-t px-3 py-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] sm:py-2">
+      <div className="flex items-center gap-2 border-t px-3 py-1.5 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] sm:py-2">
         <input
           ref={fileRef}
           type="file"

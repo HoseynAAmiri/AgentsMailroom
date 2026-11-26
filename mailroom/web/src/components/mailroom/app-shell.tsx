@@ -227,7 +227,7 @@ function Rail() {
   ];
   return (
     <nav
-      className="hide-on-kb order-last flex shrink-0 items-stretch justify-around border-t bg-sidebar pb-[env(safe-area-inset-bottom)] md:order-first md:w-14 md:flex-col md:items-center md:justify-start md:gap-1 md:border-t-0 md:border-r md:bg-card/60 md:py-2"
+      className="hide-on-kb order-last flex shrink-0 items-stretch justify-around border-t bg-sidebar px-1 pt-1 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] md:order-first md:w-14 md:flex-col md:items-center md:justify-start md:gap-1 md:border-t-0 md:border-r md:bg-card/60 md:px-0 md:py-2"
       aria-label="Apps"
     >
       {items.map((it) => {
@@ -238,7 +238,7 @@ function Rail() {
             onClick={() => setView(it.id)}
             aria-label={it.label}
             className={cn(
-              "relative m-0.5 flex h-11 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg text-[11px] font-medium transition-colors md:m-0 md:size-11 md:flex-none md:text-[10px]",
+              "relative mx-0.5 flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg py-1 text-[11px] font-medium transition-colors md:m-0 md:size-11 md:flex-none md:py-0 md:text-[10px]",
               view === it.id ? "tool-active" : "text-foreground/70 hover:bg-muted hover:text-foreground",
             )}
           >
@@ -456,7 +456,7 @@ function Shell() {
   const waiting = !snap && !error;
 
   return (
-    <div className="mailroom-shell relative flex h-dvh flex-col">
+    <div className="mailroom-shell relative flex h-full max-h-dvh flex-col">
       <TopBar />
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <Rail />
