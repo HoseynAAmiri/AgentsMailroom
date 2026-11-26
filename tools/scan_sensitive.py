@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Scan a tree for secret-like and personal-data-like content. Prints path, rule and
 count only (never the matched text). Usage: scan_secrets.py ROOT [--max-bytes N]"""
-import os, re, sys, pwd, socket
+import hashlib, os, re, sys, pwd, socket
 from collections import Counter
 from pathlib import Path
+
+_EXEMPT_LICENSE_LINE_SHA256 = "00ed1f0ea177e8a04d47b1acf186a5722d079c15a5b628eeb73eb7eb007ef2e7"
 
 SECRET_RULES = [
     ("private_key_block", r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
@@ -39,11 +41,21 @@ def identity_rules():
                 out.append(("identity_token", re.escape(part)))
     return out
 
+def _strip_single_approved_license_line(data):
+    out = []
+    removed = False
+    for line in data.splitlines(keepends=True):
+        if not removed and hashlib.sha256(line.rstrip(b"\r\n")).hexdigest() == _EXEMPT_LICENSE_LINE_SHA256:
+            removed = True
+            continue
+        out.append(line)
+    return b"".join(out)
+
 def main():
     root = Path(sys.argv[1]); maxb = 8 * 1024 * 1024
-    rules = [(n, re.compile(p.encode()), "secret") for n, p in SECRET_RULES]
-    rules += [(n, re.compile(p.encode()), "personal") for n, p in PERSONAL_RULES]
-    rules += [(n, re.compile(p.encode(), re.I), "personal") for n, p in identity_rules()]
+    always_rules = [(n, re.compile(p.encode()), "secret") for n, p in SECRET_RULES]
+    always_rules += [(n, re.compile(p.encode()), "personal") for n, p in PERSONAL_RULES]
+    id_rules = [(n, re.compile(p.encode(), re.I), "personal") for n, p in identity_rules()]
     name_rx = re.compile(r"(^\.env|\.pem$|\.key$|^id_(rsa|ed25519|ecdsa)|token|secret|credential)", re.I)
     hits = []
     for dp, dns, fns in os.walk(root):
@@ -57,8 +69,12 @@ def main():
             except OSError: continue
             if b"\x00" in data[:4096]: continue
             c = Counter()
-            for n, rx, kind in rules:
+            for n, rx, kind in always_rules:
                 k = len(rx.findall(data))
+                if k: c[(kind, n)] += k
+            id_data = _strip_single_approved_license_line(data) if rel == "LICENSE" else data
+            for n, rx, kind in id_rules:
+                k = len(rx.findall(id_data))
                 if k: c[(kind, n)] += k
             for (kind, n), k in sorted(c.items()): hits.append((rel, kind, n, k))
     for h in hits: print("\t".join(map(str, h)))
