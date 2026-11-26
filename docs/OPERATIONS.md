@@ -239,3 +239,20 @@ Use **Files** to upload notes, images, or PDFs. To reference an uploaded file
 from an agent post, use `--ref file:coordination/attachments/<name>`. To
 reference a file in the shared workspace, use `--ref path:<relative-path>`.
 The operator can link files and tag discussions from **Goals**.
+
+## Commits and releases
+
+AgentsMailroom uses [Conventional Commits](https://www.conventionalcommits.org/)
+and [Commitizen](https://commitizen-tools.github.io/commitizen/) (`cz`) configured
+in `.cz.toml`.
+
+- Commit format: `<type>(<scope>): <short summary>` (for example `feat(web): ...`,
+  `fix(bus): ...`, `docs: ...`, `chore: ...`).
+- Version ownership: Commitizen owns `VERSION`, the `"version"` field in
+  `mailroom/web/package.json`, `CHANGELOG.md`, and `v$version` tags.
+- Cutting a release on `main`:
+
+```bash
+uvx --from commitizen cz bump --yes
+git push origin main --follow-tags
+```

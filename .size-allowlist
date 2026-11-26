@@ -1,1 +1,4 @@
-# paths allowed above 512 KiB (reviewed); none
+# paths allowed above 512 KiB (reviewed)
+assets/demo-desktop.gif
+assets/demo-mobile.gif
+assets/shot-mobile.png
