@@ -1,7 +1,9 @@
 "use client"
 
+import type { ReactElement } from "react"
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
 import { cn } from "cn"
+import { useCanHover } from "@/hooks/use-mobile"
 
 function TooltipProvider({
   delay = 0,
@@ -64,4 +66,24 @@ function TooltipContent({
   )
 }
 
-export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider }
+/** Base UI tooltip. On touch screens the trigger is left alone so the first tap still activates it. */
+function HoverTip({
+  label,
+  side = "top",
+  children,
+}: {
+  label: string
+  side?: "top" | "right" | "bottom" | "left"
+  children: ReactElement
+}) {
+  const canHover = useCanHover()
+  if (!label || !canHover) return children
+  return (
+    <Tooltip>
+      <TooltipTrigger render={children} />
+      <TooltipContent side={side}>{label}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider, HoverTip }

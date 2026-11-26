@@ -1,24 +1,39 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Archive, ArchiveRestore, ArrowLeft, ChevronsUpDown, Flag, Forward, Mail, MailOpen, MoreHorizontal, Reply, ReplyAll, RotateCcw, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, Archive, ArchiveRestore, ArrowLeft, ChevronDown, ChevronUp, ChevronsUpDown, Flag, Forward, Mail, MailOpen, MoreHorizontal, Pin, Reply, ReplyAll, RotateCcw, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { eventTaskId, visibleEvents } from "@/lib/threads";
+import { eventTaskId, matchSnippet, messageHits, visibleEvents } from "@/lib/threads";
 import { fullTime, GOAL_STATE_STYLE, listTime, plainTaskTitle, TYPE_STYLE } from "@/lib/format";
 import type { BusEvent } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { AgentAvatar, Pill, RefChip, RichText, Tip } from "./bits";
+import { AgentAvatar, Highlight, Pill, RefChip, RichText, Tip } from "./bits";
 import { Composer } from "./composer";
 import { useMailroom } from "./context";
+import { MAIL_READING_TOOLBAR_CLS } from "./page-skeletons";
 
-function IconAction({ label, icon: Icon, onClick, className }: { label: string; icon: typeof Reply; onClick: () => void; className?: string }) {
+function IconAction({
+  label,
+  ariaLabel,
+  pressed,
+  icon: Icon,
+  onClick,
+  className,
+}: {
+  label: string;
+  ariaLabel?: string;
+  pressed?: boolean;
+  icon: typeof Reply;
+  onClick: () => void;
+  className?: string;
+}) {
   return (
     <Tooltip>
-      <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label={label} onClick={onClick} className={className} />}>
-        <Icon />
+      <TooltipTrigger render={<Button variant="ghost" size="icon-sm" aria-label={ariaLabel ?? label} aria-pressed={pressed} onClick={onClick} className={cn("touch:size-9", className)} />}>
+        <Icon aria-hidden="true" />
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
@@ -40,7 +55,7 @@ function Recipients({ e }: { e: BusEvent }) {
   );
 }
 
-function MessageCard({ e, expanded, onToggle, focused }: { e: BusEvent; expanded: boolean; onToggle: () => void; focused: boolean }) {
+function MessageCard({ e, expanded, onToggle, focused, query }: { e: BusEvent; expanded: boolean; onToggle: () => void; focused: boolean; query: string }) {
   const { agents, ms, mark, startCompose, openHumanIds, taskTags } = useMailroom();
   const taskTag = eventTaskId(e, taskTags);
   const deleted = ms.isDeleted(e);
@@ -49,6 +64,8 @@ function MessageCard({ e, expanded, onToggle, focused }: { e: BusEvent; expanded
   const type = TYPE_STYLE[e.type] ?? TYPE_STYLE.message;
   const sender = e.from === "user" ? "You" : agents.get(e.from)?.name ?? e.from;
   const needs = openHumanIds.has(e.id);
+  const needle = query.trim().toLowerCase();
+  const hit = !!needle && (e.id.toLowerCase() === needle || e.body.toLowerCase().includes(needle));
 
   return (
     <article
@@ -72,7 +89,11 @@ function MessageCard({ e, expanded, onToggle, focused }: { e: BusEvent; expanded
               <span className="text-xs text-muted-foreground">{listTime(e.ts)}</span>
             </Tip>
           </div>
-          {expanded ? <Recipients e={e} /> : <p className="truncate text-xs text-muted-foreground">{e.body.replace(/\s+/g, " ")}</p>}
+          {expanded ? <Recipients e={e} /> : (
+            <p className="truncate text-xs text-muted-foreground">
+              <Highlight text={hit ? matchSnippet(e.body, query, 240) : e.body.replace(/\s+/g, " ")} query={hit ? query : ""} />
+            </p>
+          )}
         </div>
       </header>
       {expanded && (
@@ -83,7 +104,7 @@ function MessageCard({ e, expanded, onToggle, focused }: { e: BusEvent; expanded
                 <AlertTriangle className="size-4 shrink-0" /> {e.from} is waiting for your decision.
               </div>
             )}
-            <RichText text={e.body} />
+            <RichText text={e.body} query={hit ? query : ""} />
             {(e.refs ?? []).length > 0 && (
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {(e.refs ?? []).map((r, i) => (
@@ -92,7 +113,7 @@ function MessageCard({ e, expanded, onToggle, focused }: { e: BusEvent; expanded
               </div>
             )}
           </div>
-          <footer className="flex items-center gap-0.5 border-t px-1.5 py-1.5 sm:gap-1 sm:px-3 sm:pl-[56px]">
+          <footer className="flex flex-wrap items-center gap-0.5 border-t px-1.5 py-1.5 sm:gap-1 sm:px-3 sm:pl-[56px]">
             <Button variant="ghost" size="sm" aria-label="Reply" onClick={() => startCompose("reply", e)}>
               <Reply /> <span className="hidden sm:inline">Reply</span>
             </Button>
@@ -156,7 +177,7 @@ function EmptyReading() {
 }
 
 export function ReadingPane() {
-  const { threads, selected, select, folder, ms, mark, compose, startCompose, focusEvent, agents, snap, openGoalTask } = useMailroom();
+  const { threads, selected, select, folder, ms, mark, compose, startCompose, focusEvent, agents, snap, openGoalTask, search } = useMailroom();
   const thread = useMemo(() => threads.find((t) => t.key === selected) ?? null, [threads, selected]);
   const evs = useMemo(() => (thread ? visibleEvents(thread, folder, ms) : []), [thread, folder, ms]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -169,12 +190,29 @@ export function ReadingPane() {
     const open = new Set(v.slice(-2).map((e) => e.id));
     v.filter(ms.isUnread).forEach((e) => open.add(e.id));
     if (focusEvent) open.add(focusEvent);
+    const q = search.trim();
+    if (q) messageHits(v, q).forEach((e) => open.add(e.id));
     setExpanded(open);
     setOlderPages(0);
     setLaterPages(0);
-    // only when the conversation changes, not on every poll
+    // only when the conversation, the focused message, or the search changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [thread?.key, focusEvent]);
+  }, [thread?.key, focusEvent, search]);
+
+  const prevSearchRef = useRef(search);
+
+  useEffect(() => {
+    const q = search.trim();
+    const searchChanged = prevSearchRef.current !== search;
+    prevSearchRef.current = search;
+    if (!thread || !q) return;
+    const found = messageHits(visibleEvents(thread, folder, ms), q);
+    if (!found.length) return;
+    // Preserve explicit event navigation (e.g. openEvent to a non-matching message) unless the query itself changed or no message is focused.
+    if (focusEvent && (!searchChanged || found.some((e) => e.id === focusEvent))) return;
+    select(thread.key, { focus: found[found.length - 1].id, markRead: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, thread?.key, focusEvent]);
 
   useEffect(() => {
     if (focusEvent) setTimeout(() => document.getElementById(`msg-${focusEvent}`)?.scrollIntoView({ block: "center", behavior: "smooth" }), 80);
@@ -207,10 +245,25 @@ export function ReadingPane() {
   const ids = evs.map((e) => e.id);
   const flagged = evs.some(ms.isFlagged);
   const deletedView = folder === "deleted";
+  const pinned = !deletedView && ms.isPinned(thread.key);
   const archived = evs.every(ms.isArchived);
   const goalTask = thread.goalTask;
   const taskStyle = goalTask ? GOAL_STATE_STYLE[goalTask.state] : null;
+  const query = search.trim();
+  const hits = query ? messageHits(evs, query) : [];
+  const hitAt = focusEvent ? hits.findIndex((e) => e.id === focusEvent) : -1;
   const focusIndex = focusEvent ? evs.findIndex((e) => e.id === focusEvent) : -1;
+  const hitIndices = hits.map((h) => evs.findIndex((e) => e.id === h.id));
+  const prevHit = hitAt > 0
+    ? hits[hitAt - 1]
+    : hitAt < 0 && focusIndex >= 0
+      ? (hits[hitIndices.filter((idx) => idx < focusIndex).length - 1] ?? null)
+      : null;
+  const nextHit = hitAt >= 0 && hitAt < hits.length - 1
+    ? hits[hitAt + 1]
+    : hitAt < 0
+      ? (hits.find((_, k) => (focusIndex >= 0 ? hitIndices[k] > focusIndex : true)) ?? null)
+      : null;
   const initialStart = focusIndex >= 0 && focusIndex < evs.length - 6 ? Math.max(0, focusIndex - 3) : Math.max(0, evs.length - 6);
   const start = Math.max(0, initialStart - olderPages * 30);
   const end = Math.min(evs.length, initialStart + 6 + laterPages * 30);
@@ -218,13 +271,14 @@ export function ReadingPane() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-0.5 border-b px-1.5 py-1.5 sm:px-3">
-        <Button variant="ghost" size="icon-sm" aria-label="Back to list" className="md:hidden" onClick={() => select(null)}>
+      <div className={MAIL_READING_TOOLBAR_CLS}>
+        <Button variant="ghost" size="icon-sm" aria-label="Back to list" className="md:hidden touch:size-9" onClick={() => select(null)}>
           <ArrowLeft />
         </Button>
+        <div className="ml-auto flex min-w-0 flex-wrap items-center gap-0.5">
         <IconAction label="Reply" icon={Reply} onClick={() => startCompose("reply", last)} />
-        <IconAction label="Reply all" icon={ReplyAll} onClick={() => startCompose("replyAll", last)} />
-        <IconAction label="Forward" icon={Forward} onClick={() => startCompose("forward", last)} />
+        <IconAction label="Reply all" icon={ReplyAll} onClick={() => startCompose("replyAll", last)} className="hidden sm:inline-flex" />
+        <IconAction label="Forward" icon={Forward} onClick={() => startCompose("forward", last)} className="hidden sm:inline-flex" />
         <div className="mx-1 h-5 w-px bg-border" />
         {!deletedView && snap?.capabilities?.admin && (
           <IconAction label={archived ? "Unarchive conversation" : "Archive conversation"} icon={archived ? ArchiveRestore : Archive}
@@ -236,11 +290,28 @@ export function ReadingPane() {
           <IconAction label="Delete" icon={Trash2} onClick={() => (mark("delete", ids), select(null))} />
         )}
         <IconAction label={flagged ? "Unflag" : "Flag"} icon={Flag} onClick={() => mark(flagged ? "unflag" : "flag", flagged ? ids : [last.id])} className={cn(flagged && "fill-red-500 text-red-500")} />
+        {!deletedView && (
+          <IconAction
+            label={pinned ? "Unpin conversation" : "Pin conversation"}
+            ariaLabel={`Pin conversation: ${thread.subject}`}
+            pressed={pinned}
+            icon={Pin}
+            onClick={() => void mark(pinned ? "unpin" : "pin", [thread.key])}
+            className={cn(pinned && "text-amber-600 dark:text-amber-400 [&_svg]:fill-current")}
+          />
+        )}
         <DropdownMenu>
-          <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="More" className="ml-auto" />}>
+          <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" className="touch:size-9" aria-label="More" />}>
             <MoreHorizontal />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuItem className="sm:hidden" onClick={() => startCompose("replyAll", last)}>
+              <ReplyAll /> Reply all
+            </DropdownMenuItem>
+            <DropdownMenuItem className="sm:hidden" onClick={() => startCompose("forward", last)}>
+              <Forward /> Forward
+            </DropdownMenuItem>
+            <DropdownMenuSeparator className="sm:hidden" />
             <DropdownMenuItem onClick={() => mark("unread", [last.id])}>
               <Mail /> Mark as unread
             </DropdownMenuItem>
@@ -256,6 +327,7 @@ export function ReadingPane() {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        </div>
       </div>
       <ScrollArea className="min-h-0 flex-1">
         <div className="mx-auto max-w-4xl space-y-3 p-3 sm:p-5">
@@ -280,6 +352,32 @@ export function ReadingPane() {
               </div>
             </div>
           </div>
+          {hits.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-300/80 bg-amber-50 px-2 py-1.5 text-xs dark:border-amber-800 dark:bg-amber-950/40">
+              <span className="min-w-0 flex-1 truncate">
+                <span className="font-medium">{hits.length}</span> {hits.length === 1 ? "message contains" : "messages contain"} “{query}”
+              </span>
+              <Button
+                variant="outline"
+                size="xs"
+                disabled={!prevHit}
+                onClick={() => prevHit && select(thread.key, { focus: prevHit.id, markRead: false })}
+              >
+                <ChevronUp /> Earlier
+              </Button>
+              <span className="tabular-nums text-muted-foreground">
+                {hitAt >= 0 ? `${hitAt + 1} of ${hits.length}` : `${hits.length} ${hits.length === 1 ? "match" : "matches"}`}
+              </span>
+              <Button
+                variant="outline"
+                size="xs"
+                disabled={!nextHit}
+                onClick={() => nextHit && select(thread.key, { focus: nextHit.id, markRead: false })}
+              >
+                Later <ChevronDown />
+              </Button>
+            </div>
+          )}
           {start > 0 && (
             <button type="button" onClick={() => setOlderPages((n) => n + 1)} className="w-full rounded-md border border-dashed py-2 text-xs text-muted-foreground hover:bg-muted">
               Load earlier messages ({start})
@@ -290,6 +388,7 @@ export function ReadingPane() {
               key={e.id}
               e={e}
               focused={e.id === focusEvent}
+              query={query}
               expanded={expanded.has(e.id)}
               onToggle={() =>
                 setExpanded((s) => {

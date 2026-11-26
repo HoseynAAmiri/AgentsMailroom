@@ -30,7 +30,9 @@ class StandaloneSmoke(unittest.TestCase):
     def exercise(self, fixture):
         store = fixture / "data"
         workspace = fixture / "workspace"
-        workspace.mkdir()
+        demo_dir = workspace / "docs" / "goals-and-tasks" / "G1" / "g1_1_demo"
+        demo_dir.mkdir(parents=True)
+        (demo_dir / "context.md").write_text("# Demo G1.1 context\n")
         web = fixture / "web"
         web.mkdir()
         (web / "index.html").write_text("<title>Mailroom smoke fixture</title>")
@@ -115,6 +117,178 @@ class StandaloneSmoke(unittest.TestCase):
                 self.assertEqual(read(admin, "/attach/" + uploaded["name"]), b"Review note")
                 detail = read(admin, "/api/todo?id=G1.1")
                 self.assertIn(uploaded["name"], json.dumps(detail))
+                read(admin, "/api/todo", post={"action": "link", "id": "G1.1", "path": "docs/goals-and-tasks/G1/g1_1_demo/context.md"})
+                goals_after = read(admin, "/api/todo")
+                admin_links = goals_after["tasks"][0]["links"]
+                self.assertIn("docs/goals-and-tasks/G1/g1_1_demo/context.md", admin_links)
+                self.assertIn(f"coordination/attachments/{uploaded['name']}", admin_links)
+                goals_pub = read(public, "/api/todo")
+                self.assertNotIn("links", goals_pub["tasks"][0])
+                self.assertNotIn(uploaded["name"], json.dumps(goals_pub))
+                detail_pub = read(public, "/api/todo?id=G1.1")
+                self.assertNotIn("links", detail_pub["task"])
+                self.assertNotIn(uploaded["name"], json.dumps(detail_pub))
+                self.assertNotIn("docs/goals-and-tasks/G1/g1_1_demo/context.md", json.dumps(detail_pub))
+
+                with self.assertRaises(HTTPError) as denied_dir:
+                    read(public, "/api/repo-dir?path=docs/goals-and-tasks/G1/g1_1_demo")
+                self.assertEqual(denied_dir.exception.code, 403)
+                docs_listing = read(admin, "/api/repo-dir?path=docs/goals-and-tasks/G1/g1_1_demo")
+                self.assertEqual(docs_listing["path"], "docs/goals-and-tasks/G1/g1_1_demo")
+                self.assertEqual(docs_listing["abs_path"], str(demo_dir.resolve()))
+                self.assertTrue(any(e["name"] == "context.md" and e["viewable"] for e in docs_listing["entries"]))
+                with self.assertRaises(HTTPError) as bad_dir:
+                    read(admin, "/api/repo-dir?path=../bus")
+                self.assertEqual(bad_dir.exception.code, 404)
+
+                agents_file = store / "bus" / "agents.json"
+                seeded_agent = read(admin, "/api/agents", post={
+                    "id": "role_probe",
+                    "name": "Role Probe",
+                    "role": "orchestrator",
+                    "role_preset": "orchestrator",
+                })
+                initial_updated_at = seeded_agent["updated_at"]
+                prev_mtime = agents_file.stat().st_mtime_ns
+                snap_full = read(admin, "/api/snapshot")
+                snap_inc_qs = (
+                    f"/api/snapshot?after={snap_full['last_id']}"
+                    f"&cursor={snap_full['event_cursor']}"
+                    f"&tasks_after={snap_full['tasks_revision']}"
+                )
+
+                updated = read(admin, "/api/agents", post={
+                    "id": "role_probe",
+                    "role": "orchestrator",
+                    "role_preset": "reviewer",
+                })
+                self.assertEqual(updated["role"], "reviewer")
+                self.assertEqual(updated["role_preset"], "reviewer")
+                self.assertEqual(updated["updated_at"], initial_updated_at)
+                self.assertGreater(agents_file.stat().st_mtime_ns, prev_mtime)
+
+                reg_entry = next(a for a in read(admin, "/api/agents")["agents"] if a["id"] == "role_probe")
+                self.assertEqual((reg_entry["role"], reg_entry["role_preset"]), ("reviewer", "reviewer"))
+                snap_after_full = next(a for a in read(admin, "/api/snapshot")["agents"] if a["id"] == "role_probe")
+                snap_after_inc = next(a for a in read(admin, snap_inc_qs)["agents"] if a["id"] == "role_probe")
+                self.assertEqual((snap_after_full["role"], snap_after_full["role_preset"]), ("reviewer", "reviewer"))
+                self.assertEqual((snap_after_inc["role"], snap_after_inc["role_preset"]), ("reviewer", "reviewer"))
+
+                custom_lead = read(admin, "/api/agents", post={
+                    "id": "role_probe",
+                    "role": "custom_lead",
+                    "role_preset": None,
+                })
+                self.assertEqual(custom_lead["role"], "custom_lead")
+                self.assertIsNone(custom_lead["role_preset"])
+
+                read(admin, "/api/agents", post={"id": "role_probe", "role": "orchestrator", "role_preset": "orchestrator"})
+                synced_preset = read(admin, "/api/agents", post={"id": "role_probe", "role": "reviewer"})
+                self.assertEqual((synced_preset["role"], synced_preset["role_preset"]), ("reviewer", "reviewer"))
+                cleared_preset = read(admin, "/api/agents", post={"id": "role_probe", "role": "custom_only"})
+                self.assertEqual(cleared_preset["role"], "custom_only")
+                self.assertIsNone(cleared_preset["role_preset"])
+                rebound_preset = read(admin, "/api/agents", post={"id": "role_probe", "role": "Worker"})
+                self.assertEqual((rebound_preset["role"], rebound_preset["role_preset"]), ("worker", "worker"))
+
+                # Legacy saved-default fixture: stored preset prompt does not shadow newly typed/selected preset.
+                bus_dir = str(ROOT / "mailroom/bus")
+                if bus_dir not in sys.path:
+                    sys.path.insert(0, bus_dir)
+                import bus
+                legacy_default = bus.ROLE_PRESETS["orchestrator"]["prompt"]
+                read(admin, "/api/agents", post={
+                    "id": "role_probe",
+                    "role": "orchestrator",
+                    "role_preset": "orchestrator",
+                    "role_prompt": legacy_default,
+                })
+                typed_switch = read(admin, "/api/agents", post={
+                    "id": "role_probe",
+                    "role": "reviewer",
+                    "role_preset": "reviewer",
+                    "role_prompt": legacy_default,
+                })
+                self.assertEqual((typed_switch["role"], typed_switch["role_preset"]), ("reviewer", "reviewer"))
+                self.assertIsNone(typed_switch["role_prompt"])
+                self.assertEqual(bus.role_text(typed_switch), bus.ROLE_PRESETS["reviewer"]["prompt"])
+                snap_typed = next(a for a in read(admin, "/api/snapshot")["agents"] if a["id"] == "role_probe")
+                reg_typed = next(a for a in read(admin, "/api/agents")["agents"] if a["id"] == "role_probe")
+                self.assertIsNone(snap_typed["role_prompt"])
+                self.assertIsNone(reg_typed["role_prompt"])
+
+                read(admin, "/api/agents", post={
+                    "id": "role_probe",
+                    "role": "orchestrator",
+                    "role_preset": "orchestrator",
+                    "role_prompt": legacy_default,
+                })
+                role_only_switch = read(admin, "/api/agents", post={"id": "role_probe", "role": "worker"})
+                self.assertEqual((role_only_switch["role"], role_only_switch["role_preset"]), ("worker", "worker"))
+                self.assertIsNone(role_only_switch["role_prompt"])
+                self.assertEqual(bus.role_text(role_only_switch), bus.ROLE_PRESETS["worker"]["prompt"])
+
+                # Explicit cross-preset role_prompt survives unrelated edits, same-role saves, and role switches.
+                read(admin, "/api/agents", post={
+                    "id": "role_probe",
+                    "role": "reviewer",
+                    "role_preset": "reviewer",
+                    "role_prompt": legacy_default,
+                })
+                unrelated_save = read(admin, "/api/agents", post={"id": "role_probe", "name": "Renamed Probe"})
+                self.assertEqual((unrelated_save["role"], unrelated_save["role_preset"]), ("reviewer", "reviewer"))
+                self.assertEqual(unrelated_save["role_prompt"], legacy_default)
+                self.assertEqual(bus.role_text(unrelated_save), legacy_default)
+
+                same_role_cross = read(admin, "/api/agents", post={
+                    "id": "role_probe",
+                    "role": "reviewer",
+                    "role_preset": "reviewer",
+                    "role_prompt": legacy_default,
+                })
+                self.assertEqual(same_role_cross["role_prompt"], legacy_default)
+                self.assertEqual(bus.role_text(same_role_cross), legacy_default)
+
+                switched_cross = read(admin, "/api/agents", post={
+                    "id": "role_probe",
+                    "role": "worker",
+                    "role_preset": "worker",
+                    "role_prompt": legacy_default,
+                })
+                self.assertEqual((switched_cross["role"], switched_cross["role_preset"]), ("worker", "worker"))
+                self.assertEqual(switched_cross["role_prompt"], legacy_default)
+                self.assertEqual(bus.role_text(switched_cross), legacy_default)
+
+                # Genuine custom role_prompt survives switching via role_preset or role-only patch.
+                read(admin, "/api/agents", post={
+                    "id": "role_probe",
+                    "role": "reviewer",
+                    "role_preset": "reviewer",
+                    "role_prompt": "Custom reviewer override.",
+                })
+                preset_custom = read(admin, "/api/agents", post={"id": "role_probe", "role": "orchestrator", "role_preset": "orchestrator"})
+                self.assertEqual((preset_custom["role"], preset_custom["role_preset"]), ("orchestrator", "orchestrator"))
+                self.assertEqual(bus.role_text(preset_custom), "Custom reviewer override.")
+                role_only_custom = read(admin, "/api/agents", post={"id": "role_probe", "role": "worker"})
+                self.assertEqual((role_only_custom["role"], role_only_custom["role_preset"]), ("worker", "worker"))
+                self.assertEqual(bus.role_text(role_only_custom), "Custom reviewer override.")
+
+                with self.assertRaises(HTTPError) as bad_preset:
+                    read(admin, "/api/agents", post={"id": "role_probe", "role_preset": "not_a_preset"})
+                self.assertEqual(bad_preset.exception.code, 400)
+
+                # Thread pinning persists in user_state.json, works on both ports, is idempotent, and removes on unpin.
+                pinned_state = read(public, "/api/user-state", post={"action": "pin", "ids": ["task:G8.8"]})
+                self.assertIn("task:G8.8", pinned_state["pinned"])
+                pin_ts = pinned_state["pinned"]["task:G8.8"]
+                again_state = read(admin, "/api/user-state", post={"action": "pin", "ids": ["task:G8.8", f"ev:{event_id}"]})
+                self.assertEqual(again_state["pinned"]["task:G8.8"], pin_ts)
+                self.assertIn(f"ev:{event_id}", again_state["pinned"])
+                snap_pinned = read(admin, "/api/snapshot")
+                self.assertIn("task:G8.8", snap_pinned["user_state"]["pinned"])
+                unpinned_state = read(admin, "/api/user-state", post={"action": "unpin", "ids": ["task:G8.8"]})
+                self.assertNotIn("task:G8.8", unpinned_state["pinned"])
+                self.assertIn(f"ev:{event_id}", unpinned_state["pinned"])
             finally:
                 server.terminate()
                 try:

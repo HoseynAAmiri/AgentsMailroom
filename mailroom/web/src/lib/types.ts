@@ -95,6 +95,7 @@ export interface UserState {
   flagged: string[];
   deleted: Record<string, string>;
   archived?: Record<string, string>;
+  pinned?: Record<string, string>;
 }
 
 export interface Run {

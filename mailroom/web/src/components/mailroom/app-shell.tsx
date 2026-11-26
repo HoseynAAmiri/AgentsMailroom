@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useDefaultLayout } from "react-resizable-panels";
 import { AlertTriangle, FolderOpen, ListTodo, Mail, Monitor, Moon, PenSquare, RefreshCw, Search, Sun, Users, X } from "lucide-react";
 import { useTheme } from "next-themes";
 import { applyThemeMeta } from "@/lib/theme";
@@ -11,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useCanHover, useIsMobile, useIsTablet } from "@/hooks/use-mobile";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { HoverTip, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import dynamic from "next/dynamic";
 import { FilesView } from "@/components/files/files-view";
 import { FileViewer } from "@/components/viewer/file-viewer";
@@ -27,8 +28,47 @@ import { ReadingPane } from "./reading-pane";
 import { StatusFeed } from "./status-feed";
 import { ThreadList } from "./thread-list";
 import { Tip } from "./bits";
+import {
+  Bone,
+  FolderSidebarSkeleton,
+  GoalsPageFallback,
+  PageSkeleton,
+  ReadingPaneSkeleton,
+  StatusFeedSkeleton,
+  ThreadListSkeleton,
+  resolveMailSkeletonVariant,
+} from "./page-skeletons";
 
-const GoalsView = dynamic(() => import("@/components/goals/goals-view").then((module) => module.GoalsView));
+const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
+
+function applyPaneLayout(groupId: string, layout: Record<string, number> | undefined) {
+  if (!layout) return;
+  const root = document.getElementById(groupId);
+  if (!root) return;
+  for (const [id, value] of Object.entries(layout)) {
+    if (typeof value !== "number" || !Number.isFinite(value)) continue;
+    const panel = document.getElementById(id);
+    if (!panel || !root.contains(panel)) continue;
+    panel.style.flexGrow = String(value);
+    panel.style.flexShrink = "1";
+    panel.style.flexBasis = "0px";
+  }
+}
+
+const paneStorage = {
+  getItem(key: string) {
+    if (typeof window === "undefined") return null;
+    try { return window.localStorage.getItem(key); } catch { return null; }
+  },
+  setItem(key: string, value: string) {
+    try { window.localStorage.setItem(key, value); } catch { /* private mode */ }
+  },
+};
+
+const GoalsView = dynamic(
+  () => import("@/components/goals/goals-view").then((module) => module.GoalsView),
+  { loading: () => <GoalsPageFallback /> },
+);
 const GB_PER_GIB = 2 ** 30 / 1e9;
 
 function Clock() {
@@ -42,7 +82,11 @@ function Clock() {
     const i = setInterval(tick, 1000);
     return () => clearInterval(i);
   }, []);
-  return <span title="Local time" className="inline-block w-[8ch] whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground">{t}</span>;
+  return (
+    <HoverTip label="Local time" side="bottom">
+      <span className="inline-block w-[8ch] whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground">{t}</span>
+    </HoverTip>
+  );
 }
 
 function ThemeToggle() {
@@ -52,21 +96,22 @@ function ThemeToggle() {
     if (resolvedTheme === "light" || resolvedTheme === "dark") applyThemeMeta(resolvedTheme);
   }, [resolvedTheme]);
   return (
-    <Button
-      variant="ghost"
-      size="icon-sm"
-      aria-label="Theme"
-      title={dark ? "Switch to Light Mode" : "Switch to Dark Mode"}
-      onClick={() => setTheme(dark ? "light" : "dark")}
-      className="text-muted-foreground hover:text-foreground touch:size-9"
-    >
-      {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
-    </Button>
+    <HoverTip label={dark ? "Switch to Light Mode" : "Switch to Dark Mode"} side="bottom">
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label="Theme"
+        onClick={() => setTheme(dark ? "light" : "dark")}
+        className="text-muted-foreground hover:text-foreground touch:size-9"
+      >
+        {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+      </Button>
+    </HoverTip>
   );
 }
 
 function TopBar() {
-  const { connected, error, snap, search, setSearch, refreshActiveView, openHuman, setFolder, view } = useMailroom();
+  const { connected, error, snap, search, setSearch, refreshActiveView, needsThreadCount, setFolder, view } = useMailroom();
   const [refreshing, setRefreshing] = useState(false);
   const ref = useRef<HTMLInputElement>(null);
   const mem = snap?.memory && "avail_gib" in snap.memory ? snap.memory : null;
@@ -86,16 +131,16 @@ function TopBar() {
   }, []);
 
   return (
-    <header className="hide-on-kb relative z-30 grid shrink-0 grid-cols-2 items-center gap-x-2 gap-y-1 border-b border-border bg-card/85 px-2 pt-[max(0.25rem,env(safe-area-inset-top))] pb-2 backdrop-blur-md sm:px-3 md:[--header-side:20.5rem] min-[900px]:h-12 min-[900px]:grid-cols-[minmax(var(--header-side),1fr)_minmax(0,36rem)_minmax(var(--header-side),1fr)] min-[900px]:pt-[env(safe-area-inset-top)] min-[900px]:pb-0 lg:[--header-side:23.5rem] xl:[--header-side:28rem]">
-      <div className="flex min-w-0 items-center gap-2.5">
+    <header className="relative z-30 flex min-h-11 shrink-0 items-center gap-1.5 border-b border-border bg-card/85 px-2 pt-[max(0.25rem,env(safe-area-inset-top))] pb-1 backdrop-blur-md sm:gap-2 sm:px-3 md:[--header-side:20.5rem] min-[900px]:grid min-[900px]:h-12 min-[900px]:min-h-0 min-[900px]:grid-cols-[minmax(var(--header-side),1fr)_minmax(0,36rem)_minmax(var(--header-side),1fr)] min-[900px]:pt-[env(safe-area-inset-top)] min-[900px]:pb-0 lg:[--header-side:23.5rem] xl:[--header-side:28rem]">
+      <div className="flex shrink-0 items-center gap-2 min-[900px]:min-w-0 min-[900px]:gap-2.5">
         <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-sky-500/30 bg-sky-500/15 text-sky-500">
           <Mail className="size-4" />
         </div>
         <div className="hidden min-w-0 leading-tight sm:block">
-          <div className="text-sm font-semibold tracking-tight">Command Center</div>
+          <div className="truncate text-sm font-semibold tracking-tight">Command Center</div>
         </div>
       </div>
-      <div className="relative col-span-2 row-start-2 min-w-0 min-[900px]:col-span-1 min-[900px]:row-start-auto">
+      <div className="relative min-w-0 flex-1 min-[900px]:flex-none">
         <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           ref={ref}
@@ -112,16 +157,16 @@ function TopBar() {
           </button>
         )}
       </div>
-      <div className="flex items-center justify-self-end gap-1 sm:gap-2">
-        {openHuman.length > 0 && (
-          <Tip label={`${openHuman.length} waiting on you`} side="bottom">
+      <div className="flex shrink-0 items-center justify-self-end gap-1 sm:gap-2">
+        {needsThreadCount > 0 && (
+          <Tip label={`${needsThreadCount} ${needsThreadCount === 1 ? "thread" : "threads"} waiting on you`} side="bottom">
             <button
               type="button"
               onClick={() => setFolder("needs")}
               aria-label="Waiting on you"
-              className="inline-flex w-14 shrink-0 items-center justify-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/15 py-1 text-xs font-semibold tabular-nums text-amber-700 hover:bg-amber-500/25 dark:text-amber-300"
+              className="inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/15 px-1.5 text-xs font-semibold tabular-nums text-amber-700 hover:bg-amber-500/25 dark:text-amber-300 sm:w-14 sm:px-0 touch:h-9"
             >
-              <AlertTriangle className="size-3.5 shrink-0" /> {openHuman.length > 99 ? "99+" : openHuman.length}
+              <AlertTriangle className="size-3.5 shrink-0" /> {needsThreadCount > 99 ? "99+" : needsThreadCount}
             </button>
           </Tip>
         )}
@@ -147,14 +192,16 @@ function TopBar() {
         <span className="hidden xl:inline">
           <Clock />
         </span>
-        <Button variant="ghost" size="icon-sm" aria-label="Refresh current view" title="Refresh current view"
-          disabled={refreshing} className="text-muted-foreground hover:text-foreground touch:size-10" onClick={async () => {
-            setRefreshing(true);
-            try { await refreshActiveView(); }
-            finally { setRefreshing(false); }
-          }}>
-          <RefreshCw className={refreshing ? "motion-safe:animate-spin" : ""} />
-        </Button>
+        <HoverTip label="Refresh current view" side="bottom">
+          <Button variant="ghost" size="icon-sm" aria-label="Refresh current view"
+            disabled={refreshing} className="text-muted-foreground hover:text-foreground touch:size-9" onClick={async () => {
+              setRefreshing(true);
+              try { await refreshActiveView(); }
+              finally { setRefreshing(false); }
+            }}>
+            <RefreshCw className={refreshing ? "motion-safe:animate-spin" : ""} />
+          </Button>
+        </HoverTip>
         <ThemeToggle />
       </div>
     </header>
@@ -180,7 +227,7 @@ function Rail() {
   ];
   return (
     <nav
-      className="hide-on-kb order-last flex shrink-0 items-stretch justify-around border-t bg-sidebar pb-[env(safe-area-inset-bottom)] md:order-first md:w-14 md:flex-col md:items-center md:justify-start md:gap-1 md:border-t-0 md:border-r md:bg-card/60 md:py-2"
+      className="hide-on-kb order-last flex shrink-0 items-stretch justify-around border-t bg-sidebar px-1 pt-1 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] md:order-first md:w-14 md:flex-col md:items-center md:justify-start md:gap-1 md:border-t-0 md:border-r md:bg-card/60 md:px-0 md:py-2"
       aria-label="Apps"
     >
       {items.map((it) => {
@@ -191,7 +238,7 @@ function Rail() {
             onClick={() => setView(it.id)}
             aria-label={it.label}
             className={cn(
-              "relative m-1 flex h-12 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg text-[11px] font-medium transition-colors md:m-0 md:size-11 md:flex-none md:text-[10px]",
+              "relative mx-0.5 flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg py-1 text-[11px] font-medium transition-colors md:m-0 md:size-11 md:flex-none md:py-0 md:text-[10px]",
               view === it.id ? "tool-active" : "text-foreground/70 hover:bg-muted hover:text-foreground",
             )}
           >
@@ -224,8 +271,31 @@ function Rail() {
 
 /** Phones: the list stays mounted under the open conversation and the composer, so Back returns to
  *  the same scroll position. Replies are written full screen, sized to the space above the keyboard. */
-function MobileMailView() {
+function MobileMailView({ loading = false }: { loading?: boolean }) {
   const { folder, selected, compose, savedDraft, startCompose } = useMailroom();
+  if (loading) {
+    const isStatus = folder === "status";
+    return (
+      <div
+        data-skeleton={isStatus ? "mail-status" : "mail"}
+        data-skeleton-variant={resolveMailSkeletonVariant(folder)}
+        role="status"
+        aria-busy="true"
+        aria-label="Loading mail"
+        className="relative h-full"
+      >
+        <div className="h-full">
+          {isStatus ? <StatusFeedSkeleton /> : <ThreadListSkeleton folder={folder} />}
+        </div>
+        {!isStatus && !compose && <Bone className="pointer-events-none absolute right-4 bottom-4 h-12 w-24 rounded-full shadow-lg" />}
+        {!isStatus && compose && (
+          <div className="absolute inset-0 z-20 bg-background">
+            <ReadingPaneSkeleton mode="compose" />
+          </div>
+        )}
+      </div>
+    );
+  }
   const reading = !!selected && folder !== "status";
   return (
     <div className="relative h-full">
@@ -268,61 +338,106 @@ function FolderDrawer() {
 }
 
 /** Tablets: conversation list and reading pane side by side; folders in the drawer. */
-function TabletMailView() {
-  const { folder } = useMailroom();
+function TabletMailView({ loading = false }: { loading?: boolean }) {
+  const { folder, compose } = useMailroom();
+  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
+    id: "mailroom-panes-tablet",
+    panelIds: ["list", "reading"],
+    storage: paneStorage,
+  });
+  useLayoutEffect(() => {
+    applyPaneLayout("mailroom-panes-tablet", defaultLayout as Record<string, number> | undefined);
+  }, [defaultLayout, folder, loading]);
+  const isStatus = folder === "status";
+  const skelAttrs = loading
+    ? {
+        "data-skeleton": isStatus ? "mail-status" : "mail",
+        "data-skeleton-variant": resolveMailSkeletonVariant(folder),
+        role: "status" as const,
+        "aria-busy": true as const,
+        "aria-label": "Loading mail",
+      }
+    : {};
   return (
-    <>
-      {folder === "status" ? (
-        <StatusFeed />
+    <div {...skelAttrs} className="h-full">
+      {isStatus ? (
+        loading ? <StatusFeedSkeleton /> : <StatusFeed />
       ) : (
-        <ResizablePanelGroup orientation="horizontal" id="mailroom-panes-tablet">
-          <ResizablePanel id="list" defaultSize="42" minSize="280px">
-            <ThreadList />
+        <ResizablePanelGroup orientation="horizontal" id="mailroom-panes-tablet" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
+          <ResizablePanel id="list" defaultSize="42%" minSize="280px">
+            {loading ? <ThreadListSkeleton folder={folder} /> : <ThreadList />}
           </ResizablePanel>
           <ResizableHandle withHandle />
-          <ResizablePanel id="reading" defaultSize="58" minSize="340px">
-            <ReadingPane />
+          <ResizablePanel id="reading" defaultSize="58%" minSize="340px">
+            {loading ? <ReadingPaneSkeleton mode={compose ? "compose" : "empty"} /> : <ReadingPane />}
           </ResizablePanel>
         </ResizablePanelGroup>
       )}
-      <FolderDrawer />
-    </>
+      {!loading && <FolderDrawer />}
+    </div>
   );
 }
 
-function MailView() {
-  const { folder } = useMailroom();
+function DesktopMailView({ loading = false }: { loading?: boolean }) {
+  const { folder, compose } = useMailroom();
+  const panelIds = folder === "status" ? ["folders", "status"] : ["folders", "list", "reading"];
+  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
+    id: "mailroom-panes",
+    panelIds,
+    storage: paneStorage,
+  });
+  useLayoutEffect(() => {
+    applyPaneLayout("mailroom-panes", defaultLayout as Record<string, number> | undefined);
+  }, [defaultLayout, folder, loading]);
+  const isStatus = folder === "status";
+  const skelAttrs = loading
+    ? {
+        "data-skeleton": isStatus ? "mail-status" : "mail",
+        "data-skeleton-variant": resolveMailSkeletonVariant(folder),
+        role: "status" as const,
+        "aria-busy": true as const,
+        "aria-label": "Loading mail",
+      }
+    : {};
+  return (
+    <div {...skelAttrs} className="h-full">
+      <ResizablePanelGroup orientation="horizontal" id="mailroom-panes" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
+        <ResizablePanel id="folders" defaultSize="17%" minSize="180px" maxSize="28%">
+          {loading ? <FolderSidebarSkeleton /> : <FolderPane />}
+        </ResizablePanel>
+        <ResizableHandle />
+        {isStatus ? (
+          <ResizablePanel id="status" defaultSize="83%">
+            {loading ? <StatusFeedSkeleton /> : <StatusFeed />}
+          </ResizablePanel>
+        ) : (
+          <>
+            <ResizablePanel id="list" defaultSize="30%" minSize="280px">
+              {loading ? <ThreadListSkeleton folder={folder} /> : <ThreadList />}
+            </ResizablePanel>
+            <ResizableHandle />
+            <ResizablePanel id="reading" defaultSize="53%" minSize="360px">
+              {loading ? <ReadingPaneSkeleton mode={compose ? "compose" : "empty"} /> : <ReadingPane />}
+            </ResizablePanel>
+          </>
+        )}
+      </ResizablePanelGroup>
+    </div>
+  );
+}
+
+function MailView({ loading = false }: { loading?: boolean }) {
   const mobile = useIsMobile();
   const tablet = useIsTablet();
-  if (mobile) return <MobileMailView />;
-  if (tablet) return <TabletMailView />;
-  return (
-    <ResizablePanelGroup orientation="horizontal" id="mailroom-panes">
-      <ResizablePanel id="folders" defaultSize="17" minSize="180px" maxSize="28">
-        <FolderPane />
-      </ResizablePanel>
-      <ResizableHandle />
-      {folder === "status" ? (
-        <ResizablePanel id="status" defaultSize="83">
-          <StatusFeed />
-        </ResizablePanel>
-      ) : (
-        <>
-          <ResizablePanel id="list" defaultSize="30" minSize="280px">
-            <ThreadList />
-          </ResizablePanel>
-          <ResizableHandle />
-          <ResizablePanel id="reading" defaultSize="53" minSize="360px">
-            <ReadingPane />
-          </ResizablePanel>
-        </>
-      )}
-    </ResizablePanelGroup>
-  );
+  if (mobile) return <MobileMailView loading={loading} />;
+  if (tablet) return <TabletMailView loading={loading} />;
+  return <DesktopMailView loading={loading} />;
 }
 
 function Shell() {
-  const { view, startCompose } = useMailroom();
+  const { view, startCompose, snap, error } = useMailroom();
+  const [booted, setBooted] = useState(false);
+  useIsomorphicLayoutEffect(() => { setBooted(true); }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
@@ -338,17 +453,27 @@ function Shell() {
   }, [startCompose]);
   useKeyboardViewport();
 
+  const waiting = !snap && !error;
+
   return (
-    <div className="mailroom-shell relative flex h-dvh flex-col">
+    <div className="mailroom-shell relative flex h-full max-h-dvh flex-col">
       <TopBar />
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <Rail />
         <main className="min-h-0 min-w-0 flex-1">
-          {view === "mail" && <MailView />}
-          {view === "goals" && <GoalsView />}
-          {view === "team" && <TeamView />}
-          {view === "machine" && <MachineView />}
-          {view === "files" && <FilesView />}
+          {!booted ? (
+            <div className="h-full" role="status" aria-busy="true" aria-label="Loading mailroom" />
+          ) : waiting ? (
+            view === "mail" ? <MailView loading /> : <PageSkeleton view={view} />
+          ) : (
+            <>
+              {view === "mail" && <MailView />}
+              {view === "goals" && <GoalsView />}
+              {view === "team" && <TeamView />}
+              {view === "machine" && <MachineView />}
+              {view === "files" && <FilesView />}
+            </>
+          )}
         </main>
       </div>
       <SummonDialog />

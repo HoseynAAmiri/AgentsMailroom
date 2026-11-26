@@ -20,6 +20,8 @@ export interface MailState {
   isArchived: (e: BusEvent) => boolean;
   isUnread: (e: BusEvent) => boolean;
   isFlagged: (e: BusEvent) => boolean;
+  isPinned: (threadKey: string) => boolean;
+  pinnedAt: (threadKey: string) => string | null;
 }
 
 export function mailState(us: UserState | undefined): MailState {
@@ -28,12 +30,15 @@ export function mailState(us: UserState | undefined): MailState {
   const flagged = new Set(us?.flagged ?? []);
   const deleted = us?.deleted ?? {};
   const archived = us?.archived ?? {};
+  const pinned = us?.pinned ?? {};
   const upto = us?.read_upto ?? 0;
   return {
     isDeleted: (e) => e.id in deleted,
     isArchived: (e) => e.id in archived,
     isUnread: (e) => e.from !== "user" && !(e.id in deleted) && (unread.has(e.id) || (idNum(e.id) > upto && !read.has(e.id))),
     isFlagged: (e) => flagged.has(e.id),
+    isPinned: (threadKey) => Object.hasOwn(pinned, threadKey),
+    pinnedAt: (threadKey) => (Object.hasOwn(pinned, threadKey) ? pinned[threadKey] : null),
   };
 }
 
@@ -159,6 +164,11 @@ export function threadInFolder(t: Thread, folder: FolderId, ctx: FolderCtx): boo
   }
 }
 
+/** Threads that appear in the "Needs you" folder (respecting deleted messages). */
+export function openHumanThreads(threads: readonly Thread[], ctx: FolderCtx): Thread[] {
+  return threads.filter((t) => threadInFolder(t, "needs", ctx));
+}
+
 export function visibleEvents(t: Thread, folder: FolderId, ms: MailState): BusEvent[] {
   return folder === "deleted" ? t.events.filter(ms.isDeleted) : t.events.filter((e) => !ms.isDeleted(e));
 }
@@ -166,6 +176,40 @@ export function visibleEvents(t: Thread, folder: FolderId, ms: MailState): BusEv
 export function lastTs(t: Thread, folder: FolderId, ms: MailState): string {
   const v = visibleEvents(t, folder, ms);
   return v.length ? v[v.length - 1].ts : "";
+}
+
+export function sortFolderThreads(list: readonly Thread[], folder: FolderId, ms: MailState): Thread[] {
+  return list
+    .map((t) => ({
+      t,
+      ts: lastTs(t, folder, ms),
+      pin: folder === "deleted" ? null : ms.pinnedAt(t.key),
+    }))
+    .sort((a, b) => {
+      if ((a.pin !== null) !== (b.pin !== null)) return a.pin !== null ? -1 : 1;
+      if (a.ts !== b.ts) return a.ts < b.ts ? 1 : -1;
+      if (a.pin !== b.pin) return (a.pin ?? "") < (b.pin ?? "") ? 1 : -1;
+      return 0;
+    })
+    .map((x) => x.t);
+}
+
+/** Messages whose id or body contains the keyword, in conversation order. */
+export function messageHits(events: readonly BusEvent[], q: string): BusEvent[] {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return [];
+  return events.filter((e) => e.id.toLowerCase() === needle || e.body.toLowerCase().includes(needle));
+}
+
+/** Excerpt centered on the keyword so a list row shows the hit, not the start of the message. */
+export function matchSnippet(body: string, q: string, n = 180): string {
+  const flat = body.replace(/\s+/g, " ").trim();
+  const needle = q.trim().toLowerCase();
+  const at = needle ? flat.toLowerCase().indexOf(needle) : -1;
+  if (at < 0) return snippet(flat, n);
+  const start = Math.max(0, at - 48);
+  const end = Math.min(flat.length, Math.max(start + n, at + needle.length + 48));
+  return `${start > 0 ? "…" : ""}${flat.slice(start, end)}${end < flat.length ? "…" : ""}`;
 }
 
 export function threadMatches(t: Thread, q: string, agents: Map<string, Agent>): boolean {

@@ -27,26 +27,33 @@ export function Tip({ label, children, className, side }: { label: string; child
 }
 
 export function AgentAvatar({ id, size = "md", agent, showState }: { id: string; size?: "sm" | "md" | "lg"; agent?: Agent; showState?: boolean }) {
-  const { avatarColors } = useMailroom();
+  const { avatarColors, lastActivity, activityNow } = useMailroom();
   const dim = size === "sm" ? "size-6 text-[10px]" : size === "lg" ? "size-10 text-sm" : "size-8 text-xs";
-  const st = agent ? effectiveState(agent) : null;
+  const st = showState && agent ? effectiveState(agent, lastActivity.get(agent.id), activityNow) : null;
   return (
-    <span className="relative inline-flex shrink-0">
+    <span className={cn("relative inline-flex shrink-0 overflow-visible", dim)}>
       <span
-        className={cn("inline-flex items-center justify-center rounded-full font-semibold text-white", dim, defaultAvatarClass(id))}
+        className={cn("inline-flex size-full items-center justify-center rounded-full font-semibold text-white", defaultAvatarClass(id))}
         style={{ backgroundColor: avatarColorValue(avatarColorId(id, avatarColors?.[id])) }}
       >
         {id === "user" ? <User className="size-[55%]" /> : initials(id)}
       </span>
-      {showState && st && (
-        <span className={cn("absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full ring-2 ring-background", STATE_DOT[st] ?? STATE_DOT.idle)} />
+      {st && (
+        <span
+          className={cn(
+            "absolute rounded-full ring-background",
+            size === "sm" ? "size-[28%] ring-1" : size === "lg" ? "size-1/4 ring-2" : "size-1/4 ring-[1.5px]",
+            STATE_DOT[st] ?? STATE_DOT.inactive,
+          )}
+          style={{ left: "85.355%", top: "85.355%", transform: "translate(-50%, -50%)" }}
+        />
       )}
     </span>
   );
 }
 
 export function StateDot({ state, className }: { state: string; className?: string }) {
-  return <span className={cn("inline-block size-2 shrink-0 rounded-full", STATE_DOT[state] ?? STATE_DOT.idle, className)} />;
+  return <span className={cn("inline-block size-2 shrink-0 rounded-full", STATE_DOT[state] ?? STATE_DOT.inactive, className)} />;
 }
 
 const CLI_ICON: Record<string, typeof Bot> = {
@@ -122,30 +129,58 @@ export function RefChip({ r }: { r: Ref }) {
         {inner}
       </a>
     ) : (
-      <span title={r.value} className="inline-flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
+      <span title={r.value} className="inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
         {inner}
       </span>
     );
   }
   const Icon = r.kind === "commit" ? GitCommit : Hash;
   return (
-    <span className="inline-flex items-center gap-1 rounded-md border bg-muted/40 px-2 py-1 font-mono text-xs text-muted-foreground">
-      <Icon className="size-3" />
-      {r.kind !== "commit" && <span className="font-sans">{r.kind}:</span>}
-      {r.value}
+    <span title={r.value} className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-md border bg-muted/40 px-2 py-1 font-mono text-xs text-muted-foreground">
+      <Icon className="size-3 shrink-0" />
+      {r.kind !== "commit" && <span className="shrink-0 font-sans">{r.kind}:</span>}
+      <span className="min-w-0 truncate">{r.value}</span>
     </span>
   );
 }
 
 const TOKEN = /(\be\d{3,}\b|https?:\/\/[^\s)]+|coordination\/attachments\/[^\s,;)]+|\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b)/g;
 
-export function RichText({ text, className }: { text: string; className?: string }) {
+export function Highlight({ text, query }: { text: string; query: string }) {
+  const needle = query.trim();
+  if (!needle) return <>{text}</>;
+  const lower = text.toLowerCase();
+  const n = needle.toLowerCase();
+  const parts: { text: string; hit: boolean }[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const at = lower.indexOf(n, i);
+    if (at < 0) {
+      parts.push({ text: text.slice(i), hit: false });
+      break;
+    }
+    if (at > i) parts.push({ text: text.slice(i, at), hit: false });
+    parts.push({ text: text.slice(at, at + n.length), hit: true });
+    i = at + n.length;
+  }
+  return (
+    <>
+      {parts.map((part, index) => part.hit ? (
+        <mark key={index} className="rounded-sm bg-amber-300/80 px-0.5 text-foreground dark:bg-amber-400/40">{part.text}</mark>
+      ) : (
+        <Fragment key={index}>{part.text}</Fragment>
+      ))}
+    </>
+  );
+}
+
+export function RichText({ text, className, query = "" }: { text: string; className?: string; query?: string }) {
   const { openEvent, threadByEvent, openFile } = useMailroom();
   const parts = text.split(TOKEN);
   return (
     <div className={cn("text-sm leading-relaxed break-words whitespace-pre-wrap", className)}>
       {parts.map((p, i) => {
-        if (i % 2 === 0) return <Fragment key={i}>{p}</Fragment>;
+        if (i % 2 === 0) return <Highlight key={i} text={p} query={query} />;
         if (/^e\d{3,}$/.test(p)) {
           return threadByEvent.has(p) ? (
             <button key={i} type="button" onClick={() => openEvent(p)} className="rounded px-0.5 font-medium text-primary hover:underline">

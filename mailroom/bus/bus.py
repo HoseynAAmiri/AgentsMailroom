@@ -147,6 +147,82 @@ def todo_mutation(values, *, admin: bool):
     return store.mutate(values, editor, set(agents))
 
 
+_TASK_ID_LINE_RE = re.compile(r"^task_id:[ \t]*['\"]?(G[1-9]\d*\.[1-9]\d*)['\"]?[ \t]*\r?$", re.M)
+_DOC_GOAL_SLUG_RE = re.compile(r"^docs/goals-and-tasks/(G[1-9]\d*)/([^/]+)/")
+_SLUG_TASK_RE = re.compile(r"^(?:(G[1-9]\d*\.[1-9]\d*)|g([1-9]\d*)_([1-9]\d*)(?:_|$))")
+RETIRED_TASK_ALIASES: dict[str, str] = {"G8.6": "G5.8"}
+
+
+def _resolve_task_alias(task_id: str | None) -> str | None:
+    """Resolve moved/retired task aliases at read time without editing write-once files."""
+    if task_id in RETIRED_TASK_ALIASES:
+        return RETIRED_TASK_ALIASES[task_id]
+    return task_id
+
+
+def _infer_doc_task_id(label: str) -> str | None:
+    """Infer G<goal>.<sub> from docs/goals-and-tasks/G<n>/<slug>/ path when present."""
+    match = _DOC_GOAL_SLUG_RE.match(label)
+    if not match:
+        return None
+    goal_dir, slug = match.group(1), match.group(2)
+    if slug == "_templates" or slug.startswith("."):
+        return None
+    slug_match = _SLUG_TASK_RE.match(slug)
+    if not slug_match:
+        return None
+    if slug_match.group(1):
+        tid = slug_match.group(1)
+    else:
+        tid = f"G{slug_match.group(2)}.{slug_match.group(3)}"
+    return tid if tid.startswith(f"{goal_dir}.") else None
+
+
+def _tracker_task_state() -> tuple[set[str], set[str], dict[str, str]] | None:
+    """Return (active_ids, retired_ids, tag_overrides) from SQLite when seeded, else None."""
+    from contextlib import closing
+    try:
+        store = todo_store()
+        if not store.initialized():
+            return None
+        with closing(store.connect()) as conn:
+            has_tasks = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='tasks'"
+            ).fetchone()
+            if not has_tasks:
+                return None
+            rows = conn.execute(
+                "SELECT tasks.id, tasks.removed, goals.removed "
+                "FROM tasks JOIN goals ON goals.id = tasks.goal_id"
+            ).fetchall()
+            tags = dict(conn.execute("SELECT event_id, task_id FROM tags"))
+    except Exception:
+        return None
+    active = {row[0] for row in rows if not row[1] and not row[2]}
+    retired = {row[0] for row in rows if row[0] not in active}
+    return active, retired, tags
+
+
+def _task_id_warning(event: dict[str, Any]) -> str | None:
+    """Return a non-blocking validation warning when a post lacks an active G#.# task_id."""
+    if event.get("type") == "agent.status" and event.get("state") == "offline":
+        return None
+    state = _tracker_task_state()
+    if state is None:
+        return None
+    active, retired, _ = state
+    tid = str(event.get("task_id") or "").strip()
+    if tid in active:
+        return None
+    kind = str(event.get("type") or "message")
+    eid = str(event.get("id") or "event")
+    if tid in retired:
+        return f"warning: {kind} {eid} uses retired task_id {tid!r} (removed in tracker); use an active G#.# task ID."
+    if tid:
+        return f"warning: {kind} {eid} task_id {tid!r} is not an active G#.# task ID in tracker."
+    return f"warning: {kind} {eid} has no active G#.# task_id; pass --task-id <G#.#>."
+
+
 @lru_cache(maxsize=1024)
 def todo_file_tag(path: Path, mtime_ns: int, size: int) -> str | None:
     try:
@@ -155,9 +231,21 @@ def todo_file_tag(path: Path, mtime_ns: int, size: int) -> str | None:
     except OSError:
         return None
     front = re.match(r"\A---\r?\n(.*?)\r?\n---(?:\r?\n|$)", header, re.S)
-    match = re.search(r"^task_id:[ \t]*['\"]?(G[1-9]\d*\.[1-9]\d*)['\"]?[ \t]*\r?$",
-                      front[1], re.M) if front else None
-    return match[1] if match else None
+    if front:
+        match = _TASK_ID_LINE_RE.search(front[1])
+        return match[1] if match else None
+    lead_lines = []
+    for line in header.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            break
+        lead_lines.append(line)
+        if len(lead_lines) >= 8:
+            break
+    if lead_lines:
+        match = _TASK_ID_LINE_RE.search("\n".join(lead_lines))
+        return match[1] if match else None
+    return None
 
 
 @lru_cache(maxsize=2)
@@ -168,7 +256,7 @@ def todo_documents(window: int):
     paths = [(ATTACH_DIR / row["name"], f"coordination/attachments/{row['name']}", ATTACH_DIR)
              for row in attachments_list(limit=5000)]
     for directory, names, children in os.walk(docs):
-        names[:] = [name for name in names if not name.startswith(".") and name != "archive"]
+        names[:] = [name for name in names if not name.startswith(".") and name not in {"archive", "_templates"}]
         paths.extend((path, path.relative_to(REPO_DIR).as_posix(), docs)
                      for child in children if child.endswith(".md") and not child.startswith(".")
                      and child != "GOALS_STATUS.md" for path in (Path(directory) / child,))
@@ -178,6 +266,9 @@ def todo_documents(window: int):
                 continue
             stat = path.stat()
             task = todo_file_tag(path, stat.st_mtime_ns, stat.st_size) if path.suffix.lower() == ".md" else None
+            if task is None:
+                task = _infer_doc_task_id(label)
+            task = _resolve_task_alias(task)
         except OSError:
             continue
         files.append((label, task, stat.st_mtime))
@@ -196,7 +287,7 @@ def todo_read(params, *, admin: bool):
         tags, _ = store.activity()
         key = params["event_id"]
         return {"override": key in tags, "task_id": tags.get(key)}
-    data = store.listing()
+    data = store.listing(include_links=admin)
     item = params.get("id")
     if item is None:
         return data
@@ -631,6 +722,32 @@ def route_error(event: dict[str, Any], data: dict[str, Any] | None = None) -> st
     return None
 
 
+def _inherit_reply_task_id(parent_id: str) -> str | None:
+    """Resolve an ancestor task_id along in_reply_to while _EVENT_INDEX.lock is held."""
+    state = _tracker_task_state()
+    active = state[0] if state is not None else None
+    tag_overrides = state[2] if state is not None else {}
+    cur = parent_id
+    visited: set[str] = set()
+    first_nonempty: str | None = None
+    while cur and cur not in visited:
+        visited.add(cur)
+        pos = _EVENT_INDEX.positions.get(cur)
+        if pos is None:
+            break
+        ev = _EVENT_INDEX.events[pos]
+        cand = str(tag_overrides.get(cur) or ev.get("task_id") or "").strip()
+        if cand:
+            if active is None:
+                return cand
+            if cand in active:
+                return cand
+            if first_nonempty is None:
+                first_nonempty = cand
+        cur = str(ev.get("in_reply_to") or "").strip()
+    return first_nonempty
+
+
 def append_event(event: dict[str, Any], check_route: bool = True) -> dict[str, Any]:
     for key in ("cc", "subject", "in_reply_to"):
         if not event.get(key):
@@ -645,6 +762,10 @@ def append_event(event: dict[str, Any], check_route: bool = True) -> dict[str, A
     with bus_lock():
         with _EVENT_INDEX.lock:
             _EVENT_INDEX.refresh()
+            if not str(event.get("task_id") or "").strip() and event.get("in_reply_to"):
+                inherited = _inherit_reply_task_id(str(event["in_reply_to"]).strip())
+                if inherited:
+                    event["task_id"] = inherited
             if not event.get("id") or event["id"] in _EVENT_INDEX.positions:
                 event["id"] = f"e{_EVENT_INDEX.max_id + 1:03d}"
         with EVENTS_PATH.open("a", encoding="utf-8") as f:
@@ -797,6 +918,7 @@ def load_user_state() -> dict[str, Any]:
         st.setdefault(key, [])
     st.setdefault("deleted", {})
     st.setdefault("archived", {})
+    st.setdefault("pinned", {})
     return st
 
 
@@ -842,6 +964,14 @@ def update_user_state(action: str, ids: list[str]) -> dict[str, Any]:
         elif action == "unarchive":
             for i in ids:
                 st["archived"].pop(i, None)
+        elif action == "pin":
+            now = utc_now()
+            for i in ids:
+                if i:
+                    st["pinned"].setdefault(i, now)
+        elif action == "unpin":
+            for i in ids:
+                st["pinned"].pop(i, None)
         else:
             raise ValueError(f"unknown action {action!r}")
         upto = st["read_upto"]
@@ -1004,6 +1134,62 @@ _ATTACHMENT_INDEX = AttachmentIndex(ATTACH_DIR)
 
 def attachments_list(limit: int = 300, offset: int = 0, force: bool = False) -> list[dict[str, Any]]:
     return _ATTACHMENT_INDEX.list(limit=limit, offset=offset, force=force)
+
+
+def list_repo_dir(rel: str) -> dict[str, Any]:
+    """List immediate non-hidden directory entries strictly inside REPO_DIR (excluding STORE_DIR)."""
+    clean = (rel or "").strip().replace("\\", "/")
+    parts = [p for p in clean.split("/") if p and p != "."]
+    if ".." in parts or any(p.startswith(".") for p in parts):
+        raise FileNotFoundError("no such directory")
+    base = REPO_DIR.resolve()
+    store_base = STORE_DIR.resolve()
+    try:
+        target = base.joinpath(*parts).resolve() if parts else base
+    except (ValueError, OSError) as exc:
+        raise FileNotFoundError("no such directory") from exc
+    if target != base and not viewable_path(target, base):
+        raise FileNotFoundError("no such directory")
+    if target == store_base or target.is_relative_to(store_base):
+        raise FileNotFoundError("no such directory")
+    if not target.is_dir():
+        raise FileNotFoundError("no such directory")
+
+    entries: list[dict[str, Any]] = []
+    for child in target.iterdir():
+        name = child.name
+        if name.startswith(".") or name in {"__pycache__", "node_modules"}:
+            continue
+        try:
+            resolved_child = child.resolve()
+            if resolved_child == store_base or resolved_child.is_relative_to(store_base):
+                continue
+            if not viewable_path(resolved_child, base):
+                continue
+            st = resolved_child.stat()
+            is_dir = resolved_child.is_dir()
+            is_file = resolved_child.is_file()
+        except OSError:
+            continue
+        if not (is_dir or is_file):
+            continue
+        rel_child = child.relative_to(base).as_posix()
+        ext = resolved_child.suffix.lower()
+        viewable = bool(is_file and (ext in TEXT_EXT or ext in MIME) and st.st_size <= VIEW_MAX_BYTES)
+        entries.append({
+            "name": name,
+            "path": rel_child,
+            "kind": "dir" if is_dir else "file",
+            "size": 0 if is_dir else st.st_size,
+            "modified": iso_mtime(st.st_mtime),
+            "viewable": viewable,
+        })
+    entries.sort(key=lambda row: (0 if row["kind"] == "dir" else 1, row["name"].lower(), row["name"]))
+    rel_dir = target.relative_to(base).as_posix() if target != base else ""
+    parent_dir = target.parent.relative_to(base).as_posix() if target != base else None
+    if parent_dir == ".":
+        parent_dir = ""
+    return {"path": rel_dir, "abs_path": str(target), "parent": parent_dir, "entries": entries}
 
 
 # ---------------------------------------------------------------- tasks
@@ -1554,9 +1740,52 @@ def upsert_agent(req: dict[str, Any]) -> dict[str, Any]:
             data.setdefault("agents", []).append(a)
         elif a.get("kind") == "temporary":
             raise ValueError("temporary agents are managed by summon/stop")
+        raw_prev_preset = a.get("role_preset")
+        if isinstance(raw_prev_preset, str) and raw_prev_preset.strip() in ROLE_PRESETS:
+            prev_preset: str | None = raw_prev_preset.strip()
+        else:
+            prev_role_val = (a.get("role") or "").strip().lower()
+            prev_preset = next(
+                (k for k, v in ROLE_PRESETS.items() if k == prev_role_val or v["label"].lower() == prev_role_val),
+                None,
+            )
+        role_touched = ("role_preset" in req) or ("role" in req)
         for k in AGENT_FIELDS:
             if k in req:
                 a[k] = req[k]
+        if "role_preset" in req:
+            raw_preset = req.get("role_preset")
+            preset_key = raw_preset.strip() if isinstance(raw_preset, str) else ""
+            if preset_key:
+                if preset_key not in ROLE_PRESETS:
+                    raise ValueError(f"unknown role_preset {preset_key!r}")
+                a["role_preset"] = preset_key
+                a["role"] = ROLE_PRESETS[preset_key]["label"].lower()
+            else:
+                a["role_preset"] = None
+        elif "role" in req:
+            role_val = (a.get("role") or "").strip().lower()
+            matched = next(
+                (k for k, v in ROLE_PRESETS.items() if k == role_val or v["label"].lower() == role_val),
+                None,
+            )
+            a["role_preset"] = matched
+            if matched:
+                a["role"] = ROLE_PRESETS[matched]["label"].lower()
+        new_preset = a.get("role_preset") if a.get("role_preset") in ROLE_PRESETS else None
+        raw_prompt = (a.get("role_prompt") or "").strip() if isinstance(a.get("role_prompt"), str) else ""
+        if "role_prompt" in req and not raw_prompt:
+            a["role_prompt"] = None
+        elif role_touched and raw_prompt:
+            if new_preset and raw_prompt == ROLE_PRESETS[new_preset]["prompt"].strip():
+                a["role_prompt"] = None
+            elif (
+                new_preset != prev_preset
+                and prev_preset is not None
+                and raw_prompt == ROLE_PRESETS[prev_preset]["prompt"].strip()
+                and (new_preset is not None or "role_prompt" not in req)
+            ):
+                a["role_prompt"] = None
         if a.get("retired"):
             a["state"] = "offline"
         save_agents(data)
@@ -1612,6 +1841,9 @@ def cmd_post(args: argparse.Namespace) -> int:
     except PermissionError as exc:
         print(str(exc), file=sys.stderr)
         return 3
+    warn = _task_id_warning(event)
+    if warn:
+        print(warn, file=sys.stderr)
     print(json.dumps(event, indent=2))
     return 0
 
@@ -1630,6 +1862,9 @@ def cmd_status(args: argparse.Namespace) -> int:
         "refs": [],
     }
     append_event(event)
+    warn = _task_id_warning(event)
+    if warn:
+        print(warn, file=sys.stderr)
     print(json.dumps(event, indent=2))
     return 0
 
@@ -1907,11 +2142,13 @@ class BusHandler(SimpleHTTPRequestHandler):
             self.send_header("Pragma", "no-cache")
         super().end_headers()
 
-    def _send_json(self, code: int, payload: Any) -> None:
+    def _send_json(self, code: int, payload: Any, headers: dict[str, str] | None = None) -> None:
         raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Vary", "Accept-Encoding")
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
         if supports_gzip(self.headers.get("Accept-Encoding", "")) and len(raw) >= 1024:
             packed = gzip.compress(raw, compresslevel=3, mtime=0)
             if len(packed) < len(raw):
@@ -2033,6 +2270,15 @@ class BusHandler(SimpleHTTPRequestHandler):
             if qs.get("refresh", ["0"])[0] == "1" and self.admin:
                 _ATTACHMENT_INDEX.invalidate()
             self._send_json(200, attachments_list(limit=limit, offset=offset))
+            return
+        if parsed.path == "/api/repo-dir":
+            if not self.admin:
+                self._send_json(403, {"error": "admin required"})
+                return
+            try:
+                self._send_json(200, list_repo_dir(qs.get("path", [""])[0]))
+            except FileNotFoundError as exc:
+                self._send_json(404, {"error": str(exc)})
             return
         if parsed.path.startswith("/api/wait/"):
             agent_id = parsed.path.split("/")[3]
@@ -2201,7 +2447,8 @@ class BusHandler(SimpleHTTPRequestHandler):
             except PermissionError as exc:
                 self._send_json(403, {"error": str(exc)})
                 return
-            self._send_json(201, event)
+            warn = _task_id_warning(event)
+            self._send_json(201, event, headers={"X-Mailroom-Warning": warn} if warn else None)
             return
 
         if parsed.path == "/api/mark-seen":

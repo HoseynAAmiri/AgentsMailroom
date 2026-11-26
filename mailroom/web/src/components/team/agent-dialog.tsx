@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { applyRoleLabelChange, applyRolePresetSelection, buildAgentUpsertPayload } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Agent } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -20,13 +21,17 @@ export function AgentDialog({ open, onOpenChange, agent }: { open: boolean; onOp
   const { snap, refresh } = useMailroom();
   const [form, setForm] = useState<Partial<Agent>>(EMPTY);
   const [busy, setBusy] = useState(false);
+  const wasOpen = useRef(false);
   const isNew = !agent;
   const clis = snap?.clis ?? {};
   const roles = snap?.roles ?? {};
   const cliItems = Object.entries(clis).map(([value, { label }]) => ({ value, label: `${label} (${value})` }));
 
   useEffect(() => {
-    if (open) setForm(agent ? { ...EMPTY, ...agent } : { ...EMPTY, id: nextId(snap?.agents ?? []) });
+    if (open && !wasOpen.current) {
+      setForm(agent ? { ...EMPTY, ...agent } : { ...EMPTY, id: nextId(snap?.agents ?? []) });
+    }
+    wasOpen.current = open;
   }, [open, agent, snap?.agents]);
 
   const set = (k: keyof Agent) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -34,21 +39,10 @@ export function AgentDialog({ open, onOpenChange, agent }: { open: boolean; onOp
   const save = async () => {
     setBusy(true);
     try {
-      await api.upsertAgent({
-        id: String(form.id ?? "").trim(),
-        name: form.name?.trim(),
-        role: form.role?.trim(),
-        role_preset: form.role_preset || null,
-        role_prompt: form.role_prompt?.trim() || null,
-        machine: form.machine?.trim(),
-        cli: form.cli,
-        session_id: form.session_id?.trim(),
-        workdir: form.workdir?.trim(),
-        notes: form.notes,
-      });
+      await api.upsertAgent(buildAgentUpsertPayload(form, roles));
+      await refresh({ full: true });
       toast.success(isNew ? `Registered ${form.id}` : `Saved ${form.id}`);
       onOpenChange(false);
-      await refresh();
     } catch (err) {
       toast.error(`Not saved: ${err instanceof Error ? err.message : err}`);
     } finally {
@@ -83,23 +77,20 @@ export function AgentDialog({ open, onOpenChange, agent }: { open: boolean; onOp
           </div>
           <div className="space-y-1.5">
             <Label>Role label</Label>
-            <Input value={form.role ?? ""} onChange={set("role")} placeholder="orchestrator, reviewer, worker…" />
+            <Input
+              value={form.role ?? ""}
+              onChange={(e) => setForm((f) => applyRoleLabelChange(f, e.target.value, roles))}
+              placeholder="orchestrator, reviewer, worker…"
+            />
           </div>
-          <div className="col-span-2 space-y-1.5">
+          <div className="space-y-1.5 sm:col-span-2">
             <Label>Role prompt</Label>
             <div className="flex flex-wrap gap-1">
               {Object.entries(roles).map(([k, r]) => (
                 <button
                   key={k}
                   type="button"
-                  onClick={() =>
-                    setForm((f) => ({
-                      ...f,
-                      role_preset: k,
-                      role: !f.role || Object.values(roles).some((x) => x.label.toLowerCase() === f.role?.toLowerCase()) || ["worker", "debate", "remote_delegator"].includes(f.role) ? r.label.toLowerCase() : f.role,
-                      role_prompt: !f.role_prompt || Object.values(roles).some((x) => x.prompt === f.role_prompt) ? r.prompt : f.role_prompt,
-                    }))
-                  }
+                  onClick={() => setForm((f) => applyRolePresetSelection(f, k, roles))}
                   className={cn("rounded-full border px-2.5 py-0.5 text-xs", form.role_preset === k ? "tool-active border-transparent" : "hover:bg-muted")}
                 >
                   {r.label}
@@ -122,16 +113,16 @@ export function AgentDialog({ open, onOpenChange, agent }: { open: boolean; onOp
             <Label>Session / conversation id</Label>
             <Input value={form.session_id ?? ""} onChange={set("session_id")} className="font-mono text-xs" placeholder="optional" />
           </div>
-          <div className="col-span-2 space-y-1.5">
+          <div className="space-y-1.5 sm:col-span-2">
             <Label>Working directory</Label>
             <Input value={form.workdir ?? ""} onChange={set("workdir")} className="font-mono text-xs" placeholder="optional, e.g. a worktree path" />
           </div>
-          <div className="col-span-2 space-y-1.5">
+          <div className="space-y-1.5 sm:col-span-2">
             <Label>Notes</Label>
             <Textarea value={form.notes ?? ""} onChange={set("notes")} rows={2} />
           </div>
           {resume && (
-            <div className="col-span-2 rounded-md bg-muted p-2 font-mono text-xs">
+            <div className="rounded-md bg-muted p-2 font-mono text-xs sm:col-span-2">
               <span className="font-sans text-muted-foreground">Resume: </span>
               {resume}
             </div>

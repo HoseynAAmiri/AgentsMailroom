@@ -3,20 +3,21 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { api, type OutgoingMessage } from "@/lib/api";
-import { useBus, useLocalStorage } from "@/hooks/use-bus";
+import { useBus, useLocalStorage, useNow, type RefreshOptions } from "@/hooks/use-bus";
 import { pushBack, useBackLayer, useHistoryRoot } from "@/hooks/use-back-layer";
 import {
   buildThreads,
   eventTaskId,
   mailState,
   openHumanRequests,
+  openHumanThreads,
   snippet,
   type FolderId,
   type MailState,
   type Thread,
 } from "@/lib/threads";
 import type { Agent, BusEvent, MailTaskIndex, Snapshot } from "@/lib/types";
-import { displayName } from "@/lib/format";
+import { buildLastActivityMap, displayName, resolveActivityNow } from "@/lib/format";
 
 export type View = "goals" | "mail" | "team" | "machine" | "files";
 export type ComposeMode = "new" | "reply" | "replyAll" | "forward";
@@ -38,10 +39,12 @@ interface Ctx {
   events: BusEvent[];
   connected: boolean;
   error: string | null;
-  refresh: () => Promise<void>;
+  refresh: (opts?: RefreshOptions) => Promise<void>;
   refreshActiveView: () => Promise<void>;
   registerViewRefresh: (view: View, handler: () => Promise<void>) => () => void;
   agents: Map<string, Agent>;
+  lastActivity: Map<string, string>;
+  activityNow: number;
   avatarColors: Record<string, string>;
   setAvatarColor: (agentId: string, colorId: string | null) => void;
   ms: MailState;
@@ -49,12 +52,13 @@ interface Ctx {
   threadByEvent: Map<string, Thread>;
   openHuman: BusEvent[];
   openHumanIds: Set<string>;
+  needsThreadCount: number;
   view: View;
   setView: (v: View) => void;
   folder: FolderId;
   setFolder: (f: FolderId) => void;
   selected: string | null;
-  select: (key: string | null, opts?: { markRead?: boolean }) => void;
+  select: (key: string | null, opts?: { markRead?: boolean; focus?: string | null }) => void;
   focusEvent: string | null;
   openEvent: (id: string) => void;
   goalTaskId: string;
@@ -115,11 +119,15 @@ const MAILBOX_FEEDBACK = {
   unarchive: "Moved back to conversations",
   flag: "Flag added",
   unflag: "Flag removed",
+  pin: "Conversation pinned",
+  unpin: "Conversation unpinned",
   read_all: "Marked all as read",
 } as const;
 
 export function MailroomProvider({ children }: { children: ReactNode }) {
-  const { snap, events, connected, error, refresh, setUserState } = useBus();
+  const { snap, events, snapshotReceivedAt, connected, error, refresh, setUserState } = useBus();
+  const tickNow = useNow(30000);
+  const activityNow = resolveActivityNow(tickNow, snapshotReceivedAt);
   const [view, setViewRaw] = useLocalStorage<View>("mr-view", "mail");
   const [mailTasks, setMailTasks] = useState<MailTaskIndex>();
   const refreshMailTasks = useCallback(async () => {
@@ -157,12 +165,12 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
     };
   }, []);
   const refreshActiveView = useCallback(async () => {
-    await Promise.all([refresh(), viewRefresh.current[view]?.(), view === "mail" && refreshMailTasks()]);
+    await Promise.all([refresh({ full: true }), viewRefresh.current[view]?.(), view === "mail" && refreshMailTasks()]);
   }, [refresh, refreshMailTasks, view]);
   const [folder, setFolderRaw] = useLocalStorage<FolderId>("mr-folder", "all");
   const [selected, setSelected] = useState<string | null>(null);
   const [focusEvent, setFocusEvent] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useLocalStorage("mr-search", "");
   const [taskFilter, setTaskFilter] = useLocalStorage("mr-tracker-task-filter", "all");
   const [goalTaskId, setGoalTaskId] = useState("");
   const [draft, setCompose] = useLocalStorage<ComposeDraft | null>("mr-draft", null);
@@ -193,6 +201,7 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
   }, [setView]);
 
   const agents = useMemo(() => new Map((snap?.agents ?? []).map((a) => [a.id, a])), [snap?.agents]);
+  const lastActivity = useMemo(() => buildLastActivityMap(events, activityNow), [events, activityNow]);
   const ms = useMemo(() => mailState(snap?.user_state), [snap?.user_state]);
   const threads = useMemo(() => buildThreads(events, snap?.tasks ?? [], mailTasks), [events, snap?.tasks, mailTasks]);
   const threadByEvent = useMemo(() => {
@@ -202,6 +211,10 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
   }, [threads]);
   const openHuman = useMemo(() => openHumanRequests(events), [events]);
   const openHumanIds = useMemo(() => new Set(openHuman.map((e) => e.id)), [openHuman]);
+  const needsThreadCount = useMemo(
+    () => openHumanThreads(threads, { ms, openHuman: openHumanIds, agents }).length,
+    [threads, ms, openHumanIds, agents],
+  );
 
   const mark = useCallback(
     async (action: Parameters<Ctx["mark"]>[0], ids: string[]) => {
@@ -219,9 +232,9 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
   );
 
   const select = useCallback(
-    (key: string | null, opts?: { markRead?: boolean }) => {
+    (key: string | null, opts?: { markRead?: boolean; focus?: string | null }) => {
       setSelected(key);
-      setFocusEvent(null);
+      setFocusEvent(opts?.focus ?? null);
       if (key && opts?.markRead !== false) {
         const t = threads.find((x) => x.key === key);
         const ids = t?.events.filter(ms.isUnread).map((e) => e.id) ?? [];
@@ -405,6 +418,8 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
     refreshActiveView,
     registerViewRefresh,
     agents,
+    lastActivity,
+    activityNow,
     avatarColors,
     setAvatarColor,
     ms,
@@ -412,6 +427,7 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
     threadByEvent,
     openHuman,
     openHumanIds,
+    needsThreadCount,
     view,
     setView,
     folder,

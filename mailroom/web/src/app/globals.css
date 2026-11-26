@@ -229,9 +229,15 @@ html[data-kb] .mailroom-shell {
   height: var(--app-h, 100dvh);
 }
 
-/* Phones: chrome that gives way to the on-screen keyboard (html[data-kb] is set by useKeyboardViewport). */
+/* Keep open modals centered and bounded inside the visual viewport above the on-screen keyboard. */
+html[data-kb] [data-slot="dialog-content"] {
+  top: calc(var(--app-top, 0px) + var(--app-h, 100dvh) / 2);
+  max-height: calc(var(--app-h, 100dvh) - 1rem);
+}
+
+/* Phones: chrome that gives way to the on-screen keyboard (never hide an element that holds focus). */
 @media (max-width: 767px) {
-  html[data-kb] .hide-on-kb {
+  html[data-kb] .hide-on-kb:not(:focus-within) {
     display: none;
   }
 }
@@ -427,4 +433,12 @@ html[data-kb] .mailroom-shell {
 /* Allow the browser's native page pull-to-refresh. */
 html {
   overscroll-behavior-y: auto;
+}
+
+/* A restored pane weight is flex-grow. Without a zero basis the list sizes
+   itself from its content and the other columns collapse on refresh. */
+[data-panel][style*="flex-grow"],
+[data-panel][style*="flex:"] {
+  flex-basis: 0px !important;
+  flex-shrink: 1 !important;
 }

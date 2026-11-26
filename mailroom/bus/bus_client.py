@@ -28,6 +28,9 @@ def call(method, path, body=None, timeout=30):
     req = urllib.request.Request(BUS_URL + path, data=data, method=method, headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as res:
+            warn = res.headers.get("X-Mailroom-Warning")
+            if warn:
+                print(warn, file=sys.stderr)
             return json.loads(res.read().decode("utf-8") or "null")
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")

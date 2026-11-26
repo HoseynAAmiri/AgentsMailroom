@@ -39,7 +39,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" suppressHydrationWarning className={`${plusJakarta.variable} ${jetbrainsMono.variable} h-full antialiased`}>
       {/* Keep vertical viewport overscroll available to Chrome's native refresh. */}
-      <body className="h-full overflow-x-clip">
+      <body className="h-full">
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false} themes={["dark", "light"]} storageKey={THEME_STORAGE_KEY} disableTransitionOnChange>
           <TooltipProvider delay={300}>
             {children}
