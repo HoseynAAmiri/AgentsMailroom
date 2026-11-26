@@ -151,9 +151,9 @@ function RepoFolderBody({
   }
 
   return (
-    <div data-repo-folder-dialog="true" data-repo-path={currentPath} className="flex min-h-0 flex-col gap-3">
+    <div data-repo-folder-dialog="true" data-repo-path={currentPath} className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
       <DialogHeader className="min-w-0 pr-8">
-        <DialogTitle className="flex items-center gap-2 text-base">
+        <DialogTitle className="flex min-w-0 items-center gap-2 text-base">
           <FolderOpen className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <span className="truncate">{title ?? rootPath.split("/").at(-1) ?? rootPath}</span>
         </DialogTitle>
@@ -162,7 +162,7 @@ function RepoFolderBody({
         </DialogDescription>
       </DialogHeader>
 
-      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border bg-muted/30 px-2 py-1.5">
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5 rounded-lg border bg-muted/30 px-2 py-1.5">
         <Button
           type="button"
           size="xs"
@@ -230,7 +230,7 @@ function RepoFolderBody({
 
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
 
-      <div className="max-h-[55dvh] min-h-40 overflow-y-auto rounded-lg border">
+      <div className="min-h-40 flex-1 overflow-y-auto overscroll-contain rounded-lg border">
         {loading && !listing ? (
           <p className="p-4 text-sm text-muted-foreground">Loading folder contents…</p>
         ) : listing && listing.entries.length === 0 ? (
@@ -310,7 +310,7 @@ export function RepoFolderDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[88dvh] overflow-hidden sm:max-w-2xl">
+      <DialogContent className="flex max-h-[88dvh] min-w-0 flex-col gap-0 overflow-hidden sm:max-w-2xl">
         {open && rootPath && (
           <RepoFolderBody key={rootPath} rootPath={rootPath} title={title} onOpenFile={onOpenFile} />
         )}

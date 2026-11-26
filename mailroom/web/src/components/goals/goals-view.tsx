@@ -890,9 +890,9 @@ export function GoalsView() {
       >
         <DialogContent
           data-task-detail-modal="true"
-          className="flex max-h-[88dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl"
+          className="flex max-h-[88dvh] min-w-0 flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl"
         >
-          <div className="shrink-0 space-y-2.5 border-b bg-card/50 px-4 pt-4 pb-3 pr-11 sm:px-5">
+          <div className="shrink-0 min-w-0 border-b bg-card/50 px-4 py-2.5 pr-11 sm:px-5">
             <div className="flex flex-wrap items-center gap-1.5">
               {task ? (
                 <>
@@ -912,40 +912,42 @@ export function GoalsView() {
                 <Badge variant="secondary"><Tag /> Triage</Badge>
               )}
             </div>
-            <DialogTitle className="text-lg leading-snug font-semibold [overflow-wrap:anywhere] sm:text-xl">
-              {detail.heading}
-            </DialogTitle>
-            {task && admin && (
-              <div className="flex flex-wrap items-center gap-2 pt-0.5">
-                <HoverTip label="Update the owner, state, priority, next action, blocker, notes, or decision flag">
-                  <Button size="sm" className="h-9 cursor-pointer touch:h-11" onClick={() => openEditor("task", task)}>Edit task</Button>
-                </HoverTip>
-                {task.state !== "done" && !task.decision && (
-                  <Button size="sm" variant="outline" className="h-9 touch:h-11" disabled={busy}
-                    onClick={() => void act({ action: "update", id: task.id, revision: task.revision, state: "done" }, "Task marked done")}>
-                    <CircleCheck /> Mark done
-                  </Button>
-                )}
-                <DropdownMenu>
-                  <DropdownMenuTrigger render={<Button size="icon" variant="outline" className="ml-auto size-9 touch:size-11" aria-label="Task actions"><MoreHorizontal /></Button>} />
-                  <DropdownMenuContent align="end" className="w-44">
-                    {([["up", ArrowUp], ["down", ArrowDown], ["top", ArrowUpToLine]] as const).map(([direction, Icon]) =>
-                      <DropdownMenuItem key={direction} disabled={busy || !orderAvailable} className="touch:min-h-11"
-                        onClick={() => void act({ action: "move", id: task.id, direction, order_revision: data?.order_revision })}><Icon /> Move {direction}</DropdownMenuItem>)}
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem variant="destructive" className="touch:min-h-11" onClick={() => setRemove({ goal: task })}>Remove task</DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            )}
           </div>
-          <div ref={detailRef} data-task-detail-scroll="true" className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
-            <Tabs value={admin ? tab : "overview"} onValueChange={(value) => { setTab(String(value)); setPage(0); setTagId(""); }}>
+          <div ref={detailRef} data-task-detail-scroll="true" className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3 sm:px-5 sm:py-4">
+            <div className="mb-3 space-y-2.5 border-b pb-3">
+              <DialogTitle className="text-base leading-snug font-semibold [overflow-wrap:anywhere] sm:text-xl">
+                {detail.heading}
+              </DialogTitle>
+              {task && admin && (
+                <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                  <HoverTip label="Update the owner, state, priority, next action, blocker, notes, or decision flag">
+                    <Button size="sm" className="h-9 cursor-pointer touch:h-11" onClick={() => openEditor("task", task)}>Edit task</Button>
+                  </HoverTip>
+                  {task.state !== "done" && !task.decision && (
+                    <Button size="sm" variant="outline" className="h-9 touch:h-11" disabled={busy}
+                      onClick={() => void act({ action: "update", id: task.id, revision: task.revision, state: "done" }, "Task marked done")}>
+                      <CircleCheck /> Mark done
+                    </Button>
+                  )}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger render={<Button size="icon" variant="outline" className="ml-auto size-9 touch:size-11" aria-label="Task actions"><MoreHorizontal /></Button>} />
+                    <DropdownMenuContent align="end" className="w-44">
+                      {([["up", ArrowUp], ["down", ArrowDown], ["top", ArrowUpToLine]] as const).map(([direction, Icon]) =>
+                        <DropdownMenuItem key={direction} disabled={busy || !orderAvailable} className="touch:min-h-11"
+                          onClick={() => void act({ action: "move", id: task.id, direction, order_revision: data?.order_revision })}><Icon /> Move {direction}</DropdownMenuItem>)}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem variant="destructive" className="touch:min-h-11" onClick={() => setRemove({ goal: task })}>Remove task</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              )}
+            </div>
+            <Tabs className="w-full min-w-0" value={admin ? tab : "overview"} onValueChange={(value) => { setTab(String(value)); setPage(0); setTagId(""); }}>
               {admin && (
-                <TabsList aria-label="Task details" className="w-full justify-stretch sm:w-fit">
-                  {task && <TabsTrigger value="overview" className="min-h-10 flex-1 px-2 touch:min-h-11 sm:px-3">Overview</TabsTrigger>}
-                  <TabsTrigger value="discussion" className="min-h-10 flex-1 px-2 touch:min-h-11 sm:px-3"><MessageSquare className="hidden sm:block" /> Discussion</TabsTrigger>
-                  <TabsTrigger value="documents" className="min-h-10 flex-1 px-2 touch:min-h-11 sm:px-3"><FileText className="hidden sm:block" /> Documents</TabsTrigger>
+                <TabsList aria-label="Task details" className="flex w-full items-stretch sm:inline-flex sm:w-fit">
+                  {task && <TabsTrigger value="overview" className="min-h-10 min-w-0 flex-1 px-1.5 text-xs touch:min-h-11 sm:flex-initial sm:px-3 sm:text-sm">Overview</TabsTrigger>}
+                  <TabsTrigger value="discussion" className="min-h-10 min-w-0 flex-1 px-1.5 text-xs touch:min-h-11 sm:flex-initial sm:px-3 sm:text-sm"><MessageSquare className="hidden sm:block" /> Discussion</TabsTrigger>
+                  <TabsTrigger value="documents" className="min-h-10 min-w-0 flex-1 px-1.5 text-xs touch:min-h-11 sm:flex-initial sm:px-3 sm:text-sm"><FileText className="hidden sm:block" /> Documents</TabsTrigger>
                 </TabsList>
               )}
               {task && <TabsContent value="overview" className="space-y-3">
