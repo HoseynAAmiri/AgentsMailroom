@@ -46,7 +46,8 @@ PERSONAL = [(n, re.compile(p.encode())) for n, p in [
 
 
 ALLOW = re.compile(
-    r"^(README\.md|LICENSE|\.gitignore|\.size-allowlist|\.githooks/pre-(commit|push)|tools/[a-z_]+\.(py|sh)"
+    r"^(README\.md|CHANGELOG\.md|VERSION|\.cz\.toml|LICENSE|\.gitignore|\.size-allowlist|\.githooks/pre-(commit|push)|tools/[a-z_]+\.(py|sh)"
+    r"|assets/[A-Za-z0-9_.-]+\.(png|gif|webp)"
     r"|docs/(GOALS|OPERATIONS)\.md|review/attachments\.allow|exports/events/e\d{5}-e\d{5}\.jsonl|exports/todo/tasks\.safe\.json"
     r"|mailroom/(run|cutover|rollback)\.sh|mailroom/bus/[a-z_]+\.py"
     r"|mailroom/web/(src/.+\.(ts|tsx|css|mjs|json|svg|md)|[^/]+\.(json|ts|mjs|md)|\.gitignore|public/[^/]+\.svg))$")

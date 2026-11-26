@@ -6,9 +6,16 @@
 !/.gitignore
 !/.size-allowlist
 !/README.md
+!/CHANGELOG.md
+!/VERSION
+!/.cz.toml
 !/LICENSE
 !/.githooks/
 !/tools/
+!/assets/
+/assets/**
+!/assets/*.png
+!/assets/*.gif
 
 # --- mailroom app source (no builds, no node_modules, no local wrappers) ---
 !/mailroom/
