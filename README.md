@@ -1,14 +1,76 @@
-# Mailroom
+# AgentsMailroom
 
-Mailroom gives a human operator and AI agents a shared inbox, threaded messages,
-file attachments, and a goal tracker. Agents can check their inbox, search past
-messages, reply, and update tasks from a shell. The Team tab configures agent
-profiles, who can message whom, and temporary sessions.
+**A shared inbox, thread reader, and goal/task tracker for a human operator and AI agents.**
 
-A typical setup uses one **Mailroom host** for the server, UI, and private
-data store. Agents can run on that host or on **worker machines** that connect
-over SSH. Each agent has a registered identity and uses the same HTTP CLI
-to read and send messages and to query goals, tasks, and priorities.
+Run a self-hosted web command center and plain shell CLI so agents on one or more machines can send threaded updates, attach plots and reports, update tracked tasks, and route only real decisions back to you.
+
+---
+
+## Live demo (mock data)
+
+<table>
+  <tr>
+    <th align="center">Desktop walkthrough (23 s)</th>
+    <th align="center">Phone walkthrough (18 s)</th>
+  </tr>
+  <tr>
+    <td align="center" width="72%">
+      <img src="assets/demo-desktop.gif" alt="Desktop walkthrough: open task modal, view PDF, read thread, reply, and move task to Done" />
+    </td>
+    <td align="center" width="28%">
+      <img src="assets/demo-mobile.gif" alt="Phone walkthrough: board, responsive task modal, thread reader, and Needs you queue" />
+    </td>
+  </tr>
+</table>
+
+*Left: open a task from the 6-stage board, inspect the linked PDF report in-app, read its message thread, send a reply, and move the task to Done. Right: browse the board on a phone, open a long-title task modal, read the thread, and triage the Needs-you queue.*
+
+### Snapshots
+
+<details open>
+<summary><b>Goal & task board with stages, priorities, and progress</b></summary>
+<br />
+<img src="assets/shot-board.png" alt="Goal and task board across six stages with priority flags and progress bar" />
+</details>
+
+<details open>
+<summary><b>Email-style thread reader with attachments</b></summary>
+<br />
+<img src="assets/shot-reader.png" alt="Email-style thread reader showing threaded messages and attached chart" />
+</details>
+
+<details open>
+<summary><b>Task modal with workspace files (context, dossier, PDF)</b></summary>
+<br />
+<img src="assets/shot-task-files.png" alt="Task modal showing folder browser with context.md, dossier.md, and PDF report" />
+</details>
+
+<details>
+<summary><b>Needs-you decision queue, Team registry, and Mobile modal</b></summary>
+<br />
+
+| Needs-you decision queue | Team & routing registry | Phone task modal |
+|---|---|---|
+| ![Needs-you queue](assets/shot-needs-you.png) | ![Team registry](assets/shot-team.png) | ![Phone task modal](assets/shot-mobile.png) |
+
+</details>
+
+---
+
+## Key features
+
+- **Shared inbox for a human and agents:** View all agent mail, task-linked discussions, status updates, and direct requests in one place.
+- **Threaded messages with attachments:** Follow full conversations in an email-style reader, reply or forward in context, and open attached images, Markdown, and logs.
+- **Goal and task board with stages and priority flags:** Track work across six pipeline stages (`Inbox`, `Assign`, `Stage`, `Run`, `Review`, `Done`) with High/Normal/Low flags and completion progress.
+- **Task files read in-app:** Browse linked task folders and open `context.md`, `dossier.md`, charts, and multi-page PDFs without leaving the browser.
+- **Needs-you queue:** Filter everyday agent traffic away from the operator so only explicit decisions interrupt the human.
+- **Team registry with routing rules:** Configure agent profiles, roles, CLI types, polling status, and explicit *who talks to whom* message routes.
+- **Temporary summoned agents:** Launch short-lived worker sessions with time limits (`TTL`), track active timers, and inspect live session logs.
+- **Plain shell CLI:** Agents check their inbox, search threads, post replies, and update tasks from any terminal using `bus_client.py` or `bus.py`.
+- **Multi-machine over SSH:** Connect remote worker machines over loopback SSH tunnels while keeping one central store and operator UI.
+- **Private local store:** Events, SQLite task state, attachments, and agent cursors live in a private data folder (`.mailroom-data/` or `COORD_STORE`), never committed to source control.
+
+---
 
 ## Run from a clean checkout
 
@@ -96,5 +158,14 @@ routing. They are not authentication credentials. Both ports provide access to
 shared data, and the admin port can launch installed agent CLIs. Keep them on a
 trusted machine. See [operations](docs/OPERATIONS.md) before setting up SSH access.
 
-Run the backend smoke test with
-`python3 -m unittest discover -s mailroom/bus -p test_smoke.py`.
+## Commits, tests, and releases
+
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `chore:`), and releases are managed with Commitizen (`.cz.toml`, `VERSION`, `mailroom/web/package.json`, `CHANGELOG.md`, `v$version` tags; see [operations](docs/OPERATIONS.md#commits-and-releases)):
+
+```bash
+# Run backend tests
+python3 -m unittest discover -s mailroom/bus -p "test_*.py"
+
+# Bump version, update CHANGELOG.md, and create tag vX.Y.Z
+uvx --from commitizen cz bump --yes
+```
