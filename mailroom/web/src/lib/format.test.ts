@@ -15,6 +15,7 @@ const {
   applyRolePresetSelection,
   buildAgentUpsertPayload,
   buildLastActivityMap,
+  buildGoalsBoardColumns,
   effectiveState,
   extractTaskDocLinks,
   findMatchingRolePreset,
@@ -28,6 +29,7 @@ const {
   priorityRank,
   resolveActivityNow,
   resolveTaskFilesFolder,
+  sortTasksByDoneTime,
   sortTasksByPriority,
   summarizeTaskProgress,
 } = (await import(new URL("./format.ts", import.meta.url).href)) as typeof FormatModule;
@@ -490,6 +492,37 @@ test("groupTasksByStage places all 6 canonical stages and preserves malformed/un
       ["T9", "malformed", "review"],
     ],
   );
+});
+
+test("buildGoalsBoardColumns sorts Done newest-first by done_at/updated while other columns stay sorted by priority", () => {
+  const sample = [
+    { id: "G1.1", next_action: "[Done] old high", priority: "high", done_at: "2026-11-20T02:00:00+00:00", updated: "2026-11-20T02:00:00+00:00" },
+    { id: "G2.11", next_action: "[Done] latest low", priority: "low", done_at: "2026-11-26T22:32:10+00:00", updated: "2026-11-26T22:32:10+00:00" },
+    { id: "G8.8", next_action: "[Done] earlier but note edited", priority: "high", done_at: "2026-11-26T22:18:24+00:00", updated: "2026-11-26T22:50:00+00:00" },
+    { id: "G7.10", next_action: "[Done] fallback updated only", priority: "normal", updated: "2026-11-26T14:54:09+00:00" },
+    { id: "G1.2", next_action: "[Done] tied second", priority: "low", done_at: "2026-11-25T20:10:00+00:00" },
+    { id: "G1.3", next_action: "[Done] tied third", priority: "high", done_at: "2026-11-25T20:10:00+00:00" },
+    { id: "G0.9", next_action: "[Done] no timestamp", priority: "high" },
+    { id: "R1", next_action: "[Run] low first in input", priority: "low", updated: "2026-11-26T23:00:00+00:00" },
+    { id: "R2", next_action: "[Run] high second in input", priority: "high", updated: "2026-11-26T01:00:00+00:00" },
+    { id: "U1", next_action: "no tag low", priority: "low" },
+    { id: "U2", next_action: "no tag high", priority: "high" },
+  ];
+
+  assert.deepEqual(
+    sortTasksByDoneTime(sample.filter((t) => t.next_action.startsWith("[Done]"))).map((t) => t.id),
+    ["G2.11", "G8.8", "G7.10", "G1.2", "G1.3", "G1.1", "G0.9"],
+  );
+
+  const board = buildGoalsBoardColumns(sample);
+  const doneCol = board.columns.find((c) => c.stage === "Done")!;
+  const runCol = board.columns.find((c) => c.stage === "Run")!;
+  assert.deepEqual(
+    doneCol.items.map((x) => x.task.id),
+    ["G2.11", "G8.8", "G7.10", "G1.2", "G1.3", "G1.1", "G0.9"],
+  );
+  assert.deepEqual(runCol.items.map((x) => x.task.id), ["R2", "R1"]);
+  assert.deepEqual(board.unstaged.map((x) => x.task.id), ["U2", "U1"]);
 });
 
 test("summarizeTaskProgress counts canonical [Done] completion only", () => {

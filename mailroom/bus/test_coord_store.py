@@ -240,6 +240,47 @@ class BoundaryAndDefaultsTest(unittest.TestCase):
         mod_fallback = load_bus_module("test_bus_todo_fallback", {**self.env, "BUS_REPO_DIR": str(empty_repo)})
         self.assertEqual(mod_fallback.todo_store().roadmap, mod_fallback.APP_DIR / "docs" / "GOALS.md")
 
+    def test_done_at_lifecycle_and_migration(self):
+        import sqlite3
+        from todo_store import TodoStore
+        db = self.store / "todo" / "legacy.sqlite3"
+        db.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(db)
+        conn.executescript(
+            """
+            CREATE TABLE metadata (singleton INTEGER PRIMARY KEY CHECK(singleton=1), revision INTEGER NOT NULL, order_revision INTEGER NOT NULL, cutover INTEGER NOT NULL, cutover_time TEXT NOT NULL, updated TEXT NOT NULL);
+            CREATE TABLE goals (id TEXT PRIMARY KEY, number INTEGER NOT NULL UNIQUE, title TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1, removed INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE tasks (id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, number INTEGER NOT NULL, position INTEGER NOT NULL, title TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'todo', owner TEXT NOT NULL DEFAULT '', priority TEXT NOT NULL DEFAULT 'normal', next_action TEXT NOT NULL DEFAULT '', blocker TEXT NOT NULL DEFAULT '', decision INTEGER NOT NULL DEFAULT 0, notes TEXT NOT NULL DEFAULT '', revision INTEGER NOT NULL DEFAULT 1, updated TEXT NOT NULL, editor TEXT NOT NULL, removed INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE links (task_id TEXT NOT NULL, path TEXT NOT NULL, editor TEXT NOT NULL, PRIMARY KEY(task_id,path));
+            CREATE TABLE tags (event_id TEXT PRIMARY KEY, task_id TEXT);
+            INSERT INTO metadata VALUES (1,1,1,0,'2026-11-19T00:00:00+00:00','2026-11-19T00:00:00+00:00');
+            INSERT INTO goals VALUES ('G1',1,'Setup',1,0);
+            INSERT INTO tasks VALUES ('G1.1','G1',1,1,'Old Done','done','worker','high','[Done] ok','',0,'',1,'2026-11-20T01:00:00+00:00','worker',0);
+            INSERT INTO tasks VALUES ('G1.2','G1',2,2,'Active','doing','worker','normal','[Run] active','',0,'',1,'2026-11-21T01:00:00+00:00','worker',0);
+            """
+        )
+        conn.commit()
+        conn.close()
+
+        store = TodoStore(db, self.repo / "docs" / "GOALS.md", self.store / "status" / "GOALS_STATUS.md")
+        listed = {row["id"]: row for row in store.listing()["tasks"]}
+        self.assertEqual(listed["G1.1"]["done_at"], "2026-11-20T01:00:00+00:00")
+        self.assertEqual(listed["G1.2"]["done_at"], "")
+
+        # Transition todo/doing -> done records done_at.
+        marked = store.mutate({"action": "update", "id": "G1.2", "revision": 1, "state": "done", "next_action": "[Done] closed"}, "worker", {"worker"})["item"]
+        first_done_at = marked["done_at"]
+        self.assertTrue(first_done_at)
+
+        # Editing notes or priority on an already-done task preserves done_at.
+        edited = store.mutate({"action": "update", "id": "G1.1", "revision": 1, "priority": "low", "notes": "note edit"}, "user", {"worker"})["item"]
+        self.assertEqual(edited["done_at"], "2026-11-20T01:00:00+00:00")
+
+        # Reopening a done task clears done_at.
+        reopened = store.mutate({"action": "update", "id": "G1.2", "revision": 2, "state": "doing", "next_action": "[Run] reopened"}, "worker", {"worker"})["item"]
+        self.assertEqual(reopened["done_at"], "")
+        self.assertNotEqual(first_done_at, "")
+
     def test_http_boundaries_and_generic_state(self):
         subprocess.run([sys.executable, str(BUS_DIR / "bus.py"), "todo", "seed"], env=self.env, check=True, stdout=subprocess.DEVNULL)
         public, admin = free_port(), free_port()

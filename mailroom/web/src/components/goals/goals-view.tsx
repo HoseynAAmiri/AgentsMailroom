@@ -386,7 +386,7 @@ export function GoalsView() {
     [listWithoutPriority, priorityFilter],
   );
   const boardRows = useMemo(
-    () => sortTasksByPriority(boardWithoutPriority.filter((row) => !priorityFilter || row.priority === priorityFilter)),
+    () => boardWithoutPriority.filter((row) => !priorityFilter || row.priority === priorityFilter),
     [boardWithoutPriority, priorityFilter],
   );
   const decisionRows = useMemo(() => rows.filter((row) => !!row.decision), [rows]);

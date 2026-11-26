@@ -53,7 +53,7 @@ ALLOW = re.compile(
     r"|mailroom/web/(src/.+\.(ts|tsx|css|mjs|json|svg|md)|[^/]+\.(json|ts|mjs|md)|\.gitignore|public/[^/]+\.svg))$")
 SCRATCH_BUILD = re.compile(r"^mailroom/(?:[^/]+/)*\.(?:[^/]+-build\.|tmp_)[^/]*/")
 SAFE_TASK_KEYS = {"goals", "tasks", "id", "number", "title", "removed", "goal_id", "position", "state",
-                  "owner", "priority", "decision", "revision", "updated"}
+                  "owner", "priority", "decision", "revision", "updated", "done_at"}
 
 
 def allowed(name, root):

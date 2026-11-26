@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     priority TEXT NOT NULL DEFAULT 'normal' CHECK(priority IN ('high','normal','low')),
     next_action TEXT NOT NULL DEFAULT '', blocker TEXT NOT NULL DEFAULT '',
     decision INTEGER NOT NULL DEFAULT 0, notes TEXT NOT NULL DEFAULT '',
-    revision INTEGER NOT NULL DEFAULT 1, updated TEXT NOT NULL, editor TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1, updated TEXT NOT NULL,
+    done_at TEXT NOT NULL DEFAULT '', editor TEXT NOT NULL,
     removed INTEGER NOT NULL DEFAULT 0, UNIQUE(goal_id,number)
 );
 CREATE INDEX IF NOT EXISTS ordered_tasks ON tasks(goal_id,removed,position);
@@ -106,7 +107,18 @@ class TodoStore:
         conn = sqlite3.connect(self.db, timeout=10)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys=ON")
+        self._ensure_done_at_column(conn)
         return conn
+
+    @staticmethod
+    def _ensure_done_at_column(conn):
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='tasks'").fetchone():
+            return
+        cols = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)")}
+        if "done_at" not in cols:
+            with conn:
+                conn.execute("ALTER TABLE tasks ADD COLUMN done_at TEXT NOT NULL DEFAULT ''")
+                conn.execute("UPDATE tasks SET done_at=updated WHERE state='done' AND done_at=''")
 
     def initialized(self) -> bool:
         return self.db.is_file()
@@ -125,10 +137,10 @@ class TodoStore:
                     conn.executemany("INSERT INTO goals(id,number,title) VALUES (?,?,?)",
                                      ((key, *values) for key, values in goals.items()))
                     conn.executemany(
-                        """INSERT INTO tasks(id,goal_id,number,position,title,state,decision,updated,editor)
-                           VALUES (?,?,?,?,?,?,?,?, 'seed')""",
+                        """INSERT INTO tasks(id,goal_id,number,position,title,state,decision,updated,done_at,editor)
+                           VALUES (?,?,?,?,?,?,?,?,?, 'seed')""",
                         ((key, goal, number, number, title, {" ": "todo", "~": "doing", "?": "blocked", "x": "done"}[mark],
-                          int(mark == "?"), stamp) for key, goal, number, title, mark in tasks),
+                          int(mark == "?"), stamp, stamp if mark == "x" else "") for key, goal, number, title, mark in tasks),
                     )
         return {"seeded": created, **self.try_export()}
 
@@ -242,11 +254,13 @@ class TodoStore:
                 key = f"{goal}.{number}"
                 fields = self.task_fields(values, owners, admin, creating=True)
                 fields["title"] = self.title(values)
+                stamp = now()
+                done_at = stamp if fields.get("state") == "done" else ""
                 columns = ",".join(fields)
                 placeholders = ",".join("?" for _ in fields)
-                conn.execute(f"""INSERT INTO tasks(id,goal_id,number,position,updated,editor,{columns})
-                              VALUES (?,?,?,?,?,?,{placeholders})""",
-                             (key, goal, number, position, now(), editor, *fields.values()))
+                conn.execute(f"""INSERT INTO tasks(id,goal_id,number,position,updated,done_at,editor,{columns})
+                              VALUES (?,?,?,?,?,?,?,{placeholders})""",
+                             (key, goal, number, position, stamp, done_at, editor, *fields.values()))
                 result = self.record(conn, "tasks", key)
                 changes_order = True
             elif action == "tag":
@@ -287,7 +301,15 @@ class TodoStore:
                         if not admin:
                             raise TodoError("Only USER can resolve this decision", 403)
                         raise TodoError("Clear the USER decision flag to change this state")
-                    self.update_task(conn, key, fields, editor)
+                    stamp = now()
+                    if action == "update":
+                        prev_state = row["state"]
+                        next_state = fields.get("state", prev_state)
+                        if next_state == "done" and (prev_state != "done" or not row.get("done_at")):
+                            fields["done_at"] = stamp
+                        elif next_state != "done" and prev_state == "done":
+                            fields["done_at"] = ""
+                    self.update_task(conn, key, fields, editor, stamp=stamp)
                     result = {"id": key, "removed": True} if action == "remove" else self.record(conn, "tasks", key)
                     changes_order = action == "remove"
             else:
@@ -327,8 +349,8 @@ class TodoStore:
         return fields
 
     @staticmethod
-    def update_task(conn, key, fields, editor):
-        fields = {**fields, "updated": now(), "editor": editor}
+    def update_task(conn, key, fields, editor, *, stamp=None):
+        fields = {**fields, "updated": stamp or now(), "editor": editor}
         setters = ",".join(f"{field}=?" for field in fields)
         conn.execute(f"UPDATE tasks SET {setters},revision=revision+1 WHERE id=?", (*fields.values(), key))
 

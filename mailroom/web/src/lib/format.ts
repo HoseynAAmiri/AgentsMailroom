@@ -238,6 +238,22 @@ export function sortTasksByPriority<T extends { priority?: string | null }>(task
   return [...tasks].sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority));
 }
 
+function taskDoneTimestampMs(task: { done_at?: string | null; updated?: string | null }): number {
+  const raw = (task.done_at || task.updated || "").trim();
+  if (!raw) return -Infinity;
+  const ms = Date.parse(raw);
+  return Number.isFinite(ms) ? ms : -Infinity;
+}
+
+/** Return a copy sorted newest-done first (`done_at` falling back to `updated`), keeping original order on ties. */
+export function sortTasksByDoneTime<T extends { done_at?: string | null; updated?: string | null }>(tasks: readonly T[]): T[] {
+  return [...tasks].sort((a, b) => {
+    const tb = taskDoneTimestampMs(b);
+    const ta = taskDoneTimestampMs(a);
+    return tb === ta ? 0 : tb - ta;
+  });
+}
+
 /** True when a task is ready to start next (todo and not held on a USER decision). */
 export function isTaskReadyNext(task: { state: string; decision?: number | boolean | null }): boolean {
   return task.state === "todo" && !task.decision;
@@ -560,6 +576,30 @@ export function groupTasksByStage<T extends { next_action?: string | null }>(
   return {
     columns: TASK_STAGES.map((stage) => ({ stage, items: byStage.get(stage)! })),
     unstaged,
+  };
+}
+
+/** Group tasks into Board columns: Done is ordered newest-done first (`done_at` / `updated`), all others by priority. */
+export function buildGoalsBoardColumns<
+  T extends { next_action?: string | null; priority?: string | null; done_at?: string | null; updated?: string | null },
+>(tasks: readonly T[]): {
+  columns: { stage: TaskStage; items: StagedTaskItem<T>[] }[];
+  unstaged: StagedTaskItem<T>[];
+} {
+  const { columns, unstaged } = groupTasksByStage(tasks);
+  const byPriority = (a: StagedTaskItem<T>, b: StagedTaskItem<T>) =>
+    priorityRank(a.task.priority) - priorityRank(b.task.priority);
+  const byDoneTimeDesc = (a: StagedTaskItem<T>, b: StagedTaskItem<T>) => {
+    const tb = taskDoneTimestampMs(b.task);
+    const ta = taskDoneTimestampMs(a.task);
+    return tb === ta ? 0 : tb - ta;
+  };
+  return {
+    columns: columns.map((col) => ({
+      stage: col.stage,
+      items: [...col.items].sort(col.stage === "Done" ? byDoneTimeDesc : byPriority),
+    })),
+    unstaged: [...unstaged].sort(byPriority),
   };
 }
 

@@ -424,7 +424,7 @@ def export_events(work_tree: Path) -> int:
 SAFE_GOAL_FIELDS = ("id", "number", "title", "removed")
 SAFE_TASK_FIELDS = (
     "id", "goal_id", "number", "position", "title", "state", "owner",
-    "priority", "decision", "revision", "updated", "removed",
+    "priority", "decision", "revision", "updated", "done_at", "removed",
 )
 
 
@@ -437,9 +437,10 @@ def export_todo(work_tree: Path) -> None:
     src = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     src.row_factory = sqlite3.Row
     try:
+        task_cols = {r["name"] for r in src.execute("pragma table_info(tasks)")}
         data = {
             "goals": [{k: r[k] for k in SAFE_GOAL_FIELDS} for r in src.execute("select * from goals order by number")],
-            "tasks": [{k: r[k] for k in SAFE_TASK_FIELDS} for r in src.execute("select * from tasks order by goal_id, position")],
+            "tasks": [{k: (r[k] if k in task_cols else "") for k in SAFE_TASK_FIELDS} for r in src.execute("select * from tasks order by goal_id, position")],
         }
     finally:
         src.close()

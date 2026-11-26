@@ -17,10 +17,9 @@ import {
   PRIORITY_STYLE,
   TASK_STAGE_META,
   TASK_STAGE_STYLE,
-  groupTasksByStage,
+  buildGoalsBoardColumns,
   plainTaskTitle,
   resolveTaskFilesFolder,
-  sortTasksByPriority,
   type ParsedTaskStage,
   type TaskDocFolder,
   type TaskStage,
@@ -51,6 +50,8 @@ export interface GoalTask extends GoalSummary {
   blocker: string;
   notes: string;
   decision: number;
+  updated?: string;
+  done_at?: string;
   links?: string[];
 }
 
@@ -362,7 +363,7 @@ export function GoalsBoard({
   onChangePriority,
   onOpenFiles,
 }: GoalsBoardProps) {
-  const { columns, unstaged } = groupTasksByStage(sortTasksByPriority(tasks));
+  const { columns, unstaged } = buildGoalsBoardColumns(tasks);
 
   return (
     <div
