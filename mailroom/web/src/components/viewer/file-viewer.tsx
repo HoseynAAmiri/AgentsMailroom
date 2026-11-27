@@ -1,37 +1,165 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Download, ExternalLink, File as FileIcon, Loader2, Maximize, Minus, Plus, WrapText, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { attachmentDownloadHref, fileExtension, fileKind, type FileKind } from "@/lib/api";
+import {
+  clampZoom,
+  computeElementScrollDelta,
+  computeFractionalScrollTarget,
+  computeImagePinchTransform,
+} from "@/lib/pinch";
 import { Button } from "@/components/ui/button";
 import { useMailroom, type ViewedFile } from "@/components/mailroom/context";
 
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 8;
-const clamp = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+const clamp = (z: number) => clampZoom(z, MIN_ZOOM, MAX_ZOOM);
 
-/** Pinch (two fingers) and Ctrl/⌘ + wheel change `zoom`; one-finger scrolling stays native. */
-function usePinchZoom(ref: RefObject<HTMLElement | null>, zoom: number, setZoom: (z: number) => void) {
+type PinchAnchor =
+  | { kind: "element"; index: number; relX: number; relY: number }
+  | { kind: "scroll"; fracX: number; fracY: number };
+
+interface PendingPinchAnchor {
+  anchor: PinchAnchor;
+  clientX: number;
+  clientY: number;
+}
+
+function capturePinchAnchor(
+  el: HTMLElement,
+  anchorSelector: string | undefined,
+  clientX: number,
+  clientY: number,
+): PinchAnchor {
+  if (anchorSelector) {
+    const targets = Array.from(el.querySelectorAll<HTMLElement>(anchorSelector));
+    if (targets.length > 0) {
+      let bestIdx = 0;
+      let bestDist = Infinity;
+      for (let i = 0; i < targets.length; i++) {
+        const r = targets[i].getBoundingClientRect();
+        const dy = clientY < r.top ? r.top - clientY : clientY > r.bottom ? clientY - r.bottom : 0;
+        if (dy < bestDist) {
+          bestDist = dy;
+          bestIdx = i;
+        }
+        if (dy === 0 && clientX >= r.left && clientX <= r.right) break;
+      }
+      const r = targets[bestIdx].getBoundingClientRect();
+      return {
+        kind: "element",
+        index: bestIdx,
+        relX: (clientX - r.left) / Math.max(1, r.width),
+        relY: (clientY - r.top) / Math.max(1, r.height),
+      };
+    }
+  }
+  const box = el.getBoundingClientRect();
+  return {
+    kind: "scroll",
+    fracX: (el.scrollLeft + (clientX - box.left)) / Math.max(1, el.scrollWidth),
+    fracY: (el.scrollTop + (clientY - box.top)) / Math.max(1, el.scrollHeight),
+  };
+}
+
+function applyPinchAnchor(
+  el: HTMLElement,
+  anchorSelector: string | undefined,
+  pending: PendingPinchAnchor,
+): void {
+  const { anchor, clientX, clientY } = pending;
+  if (anchor.kind === "element" && anchorSelector) {
+    const targets = el.querySelectorAll<HTMLElement>(anchorSelector);
+    const target = targets[anchor.index];
+    if (target) {
+      const r = target.getBoundingClientRect();
+      const { dScrollLeft, dScrollTop } = computeElementScrollDelta({
+        elemLeft: r.left,
+        elemTop: r.top,
+        elemWidth: r.width,
+        elemHeight: r.height,
+        relX: anchor.relX,
+        relY: anchor.relY,
+        targetClientX: clientX,
+        targetClientY: clientY,
+      });
+      el.scrollLeft = Math.max(0, el.scrollLeft + dScrollLeft);
+      el.scrollTop = Math.max(0, el.scrollTop + dScrollTop);
+      return;
+    }
+  }
+  if (anchor.kind === "scroll") {
+    const box = el.getBoundingClientRect();
+    const { scrollLeft, scrollTop } = computeFractionalScrollTarget({
+      fracX: anchor.fracX,
+      fracY: anchor.fracY,
+      curScrollWidth: el.scrollWidth,
+      curScrollHeight: el.scrollHeight,
+      viewportRelX: clientX - box.left,
+      viewportRelY: clientY - box.top,
+    });
+    el.scrollLeft = scrollLeft;
+    el.scrollTop = scrollTop;
+  }
+}
+
+/** Pinch (two fingers) and Ctrl/⌘ + wheel change `zoom` anchored at the gesture midpoint; one-finger scrolling stays native. */
+function usePinchZoom(
+  ref: RefObject<HTMLElement | null>,
+  zoom: number,
+  setZoom: (z: number) => void,
+  anchorSelector?: string,
+) {
   const zoomRef = useRef(zoom);
-  useEffect(() => {
+  const pendingAnchorRef = useRef<PendingPinchAnchor | null>(null);
+
+  useLayoutEffect(() => {
     zoomRef.current = zoom;
-  }, [zoom]);
+    const el = ref.current;
+    const pending = pendingAnchorRef.current;
+    pendingAnchorRef.current = null;
+    if (!el || !pending) return;
+    applyPinchAnchor(el, anchorSelector, pending);
+  }, [ref, zoom, anchorSelector]);
+
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    let start: { d: number; z: number } | null = null;
+    let start: { d: number; z: number; anchor: PinchAnchor } | null = null;
     const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const mid = (t: TouchList) => ({
+      x: (t[0].clientX + t[1].clientX) / 2,
+      y: (t[0].clientY + t[1].clientY) / 2,
+    });
     const onStart = (e: TouchEvent) => {
-      if (e.touches.length === 2) start = { d: dist(e.touches), z: zoomRef.current };
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        const m = mid(e.touches);
+        start = {
+          d: Math.max(10, dist(e.touches)),
+          z: zoomRef.current,
+          anchor: capturePinchAnchor(el, anchorSelector, m.x, m.y),
+        };
+      }
     };
     const onMove = (e: TouchEvent) => {
       if (!start || e.touches.length !== 2) return;
       e.preventDefault();
-      setZoom(clamp((start.z * dist(e.touches)) / start.d));
+      const m = mid(e.touches);
+      const nz = clamp((start.z * Math.max(10, dist(e.touches))) / start.d);
+      const pending: PendingPinchAnchor = { anchor: start.anchor, clientX: m.x, clientY: m.y };
+      if (Math.abs(nz - zoomRef.current) > 1e-6) {
+        pendingAnchorRef.current = pending;
+        zoomRef.current = nz;
+        setZoom(nz);
+      } else {
+        applyPinchAnchor(el, anchorSelector, pending);
+      }
     };
     const onEnd = (e: TouchEvent) => {
       if (e.touches.length < 2) start = null;
@@ -39,9 +167,17 @@ function usePinchZoom(ref: RefObject<HTMLElement | null>, zoom: number, setZoom:
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
-      setZoom(clamp(zoomRef.current * Math.exp(-e.deltaY * 0.0025)));
+      const nz = clamp(zoomRef.current * Math.exp(-e.deltaY * 0.0025));
+      if (Math.abs(nz - zoomRef.current) <= 1e-6) return;
+      pendingAnchorRef.current = {
+        anchor: capturePinchAnchor(el, anchorSelector, e.clientX, e.clientY),
+        clientX: e.clientX,
+        clientY: e.clientY,
+      };
+      zoomRef.current = nz;
+      setZoom(nz);
     };
-    el.addEventListener("touchstart", onStart, { passive: true });
+    el.addEventListener("touchstart", onStart, { passive: false });
     el.addEventListener("touchmove", onMove, { passive: false });
     el.addEventListener("touchend", onEnd);
     el.addEventListener("touchcancel", onEnd);
@@ -53,7 +189,7 @@ function usePinchZoom(ref: RefObject<HTMLElement | null>, zoom: number, setZoom:
       el.removeEventListener("touchcancel", onEnd);
       el.removeEventListener("wheel", onWheel);
     };
-  }, [ref, setZoom]);
+  }, [ref, setZoom, anchorSelector]);
 }
 
 // ---------------------------------------------------------------- image
@@ -80,7 +216,10 @@ function ImageView({ src, zoom, setZoom, fitKey }: { src: string; zoom: number; 
       const ox = cx - box.left - box.width / 2;
       const oy = cy - box.top - box.height / 2;
       const k = nz / z;
-      setPanState({ fitKey: fk, x: ox - (ox - p.x) * k, y: oy - (oy - p.y) * k });
+      const nx = ox - (ox - p.x) * k;
+      const ny = oy - (oy - p.y) * k;
+      state.current = { zoom: nz, pan: { x: nx, y: ny }, fitKey: fk };
+      setPanState({ fitKey: fk, x: nx, y: ny });
       setZoom(nz);
     },
     [setZoom],
@@ -90,14 +229,22 @@ function ImageView({ src, zoom, setZoom, fitKey }: { src: string; zoom: number; 
     const el = boxRef.current;
     if (!el) return;
     const pointers = new Map<number, { x: number; y: number }>();
-    let pinch: { d: number; z: number } | null = null;
+    let pinch: { d: number; z: number; panX: number; panY: number; midX: number; midY: number } | null = null;
     let lastTap = 0;
     const onDown = (e: PointerEvent) => {
       el.setPointerCapture(e.pointerId);
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pointers.size === 2) {
         const [a, b] = [...pointers.values()];
-        pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), z: state.current.zoom };
+        const cur = state.current;
+        pinch = {
+          d: Math.max(10, Math.hypot(a.x - b.x, a.y - b.y)),
+          z: cur.zoom,
+          panX: cur.pan.x,
+          panY: cur.pan.y,
+          midX: (a.x + b.x) / 2,
+          midY: (a.y + b.y) / 2,
+        };
       } else if (e.pointerType === "touch") {
         const now = Date.now();
         if (now - lastTap < 300) zoomAt(state.current.zoom > 1.01 ? 1 : 2.5, e.clientX, e.clientY);
@@ -111,13 +258,37 @@ function ImageView({ src, zoom, setZoom, fitKey }: { src: string; zoom: number; 
       pointers.set(e.pointerId, cur);
       if (pointers.size === 2 && pinch) {
         const [a, b] = [...pointers.values()];
-        zoomAt((pinch.z * Math.hypot(a.x - b.x, a.y - b.y)) / pinch.d, (a.x + b.x) / 2, (a.y + b.y) / 2);
+        const box = el.getBoundingClientRect();
+        const next = computeImagePinchTransform({
+          startZoom: pinch.z,
+          startPanX: pinch.panX,
+          startPanY: pinch.panY,
+          startMidX: pinch.midX,
+          startMidY: pinch.midY,
+          startDist: pinch.d,
+          curMidX: (a.x + b.x) / 2,
+          curMidY: (a.y + b.y) / 2,
+          curDist: Math.hypot(a.x - b.x, a.y - b.y),
+          boxLeft: box.left,
+          boxTop: box.top,
+          boxWidth: box.width,
+          boxHeight: box.height,
+          minZoom: MIN_ZOOM,
+          maxZoom: MAX_ZOOM,
+        });
+        const fk = state.current.fitKey;
+        state.current = { zoom: next.zoom, pan: { x: next.panX, y: next.panY }, fitKey: fk };
+        setPanState({ fitKey: fk, x: next.panX, y: next.panY });
+        setZoom(next.zoom);
       } else if (pointers.size === 1) {
         const fk = state.current.fitKey;
-        setPanState((p) => {
-          const base = p.fitKey === fk ? p : { fitKey: fk, x: 0, y: 0 };
-          return { fitKey: fk, x: base.x + cur.x - prev.x, y: base.y + cur.y - prev.y };
-        });
+        const dx = cur.x - prev.x;
+        const dy = cur.y - prev.y;
+        const base = state.current.fitKey === fk ? state.current.pan : { x: 0, y: 0 };
+        const nx = base.x + dx;
+        const ny = base.y + dy;
+        state.current = { zoom: state.current.zoom, pan: { x: nx, y: ny }, fitKey: fk };
+        setPanState({ fitKey: fk, x: nx, y: ny });
       }
     };
     const onUp = (e: PointerEvent) => {
@@ -143,7 +314,7 @@ function ImageView({ src, zoom, setZoom, fitKey }: { src: string; zoom: number; 
       el.removeEventListener("wheel", onWheel);
       el.removeEventListener("dblclick", onDbl);
     };
-  }, [zoomAt]);
+  }, [setZoom, zoomAt]);
 
   return (
     <div ref={boxRef} className="relative h-full w-full cursor-grab touch-none overflow-hidden select-none active:cursor-grabbing">
@@ -209,7 +380,7 @@ function PdfView({ src, zoom, setZoom }: { src: string; zoom: number; setZoom: (
   const [doc, setDoc] = useState<PdfDoc | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [width, setWidth] = useState(0);
-  usePinchZoom(scrollRef, zoom, setZoom);
+  usePinchZoom(scrollRef, zoom, setZoom, "canvas");
 
   useEffect(() => {
     let dead = false;
