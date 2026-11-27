@@ -1,10 +1,10 @@
 "use client";
 
 import { Fragment, type MouseEvent, type ReactNode } from "react";
-import { Bot, Code2, FileImage, FileText, FileType, GitCommit, Hash, Link2, MousePointer2, Orbit, Sparkles, Terminal, User } from "lucide-react";
+import { Bot, Code2, File, FileArchive, FileAudio, FileCode, FileImage, FileSpreadsheet, FileText, FileType, FileVideo, GitCommit, Hash, Link2, MousePointer2, Orbit, Sparkles, Terminal, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { avatarColorId, avatarColorValue, defaultAvatarClass, effectiveState, initials, STATE_DOT } from "@/lib/format";
-import { attachmentHref, fileHref, fileKind } from "@/lib/api";
+import { attachmentHref, fileExtension, fileHref, fileKind } from "@/lib/api";
 import type { Agent, Ref } from "@/lib/types";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCanHover } from "@/hooks/use-mobile";
@@ -86,10 +86,19 @@ function viewOnClick(open: () => void) {
   };
 }
 
-function FileIcon({ name }: { name: string }) {
+export function FileTypeIcon({ name, className = "size-3.5 shrink-0 text-sky-500" }: { name: string; className?: string }) {
   const kind = fileKind(name);
-  const Icon = kind === "image" ? FileImage : kind === "pdf" ? FileType : FileText;
-  return <Icon className="size-3.5 shrink-0 text-sky-500" />;
+  const ext = fileExtension(name);
+  let Icon = FileText;
+  if (kind === "image") Icon = FileImage;
+  else if (kind === "pdf") Icon = FileType;
+  else if (kind === "audio") Icon = FileAudio;
+  else if (kind === "video") Icon = FileVideo;
+  else if (["zip", "tar", "gz", "tgz", "7z", "rar", "xz", "bz2"].includes(ext)) Icon = FileArchive;
+  else if (["csv", "tsv", "xls", "xlsx", "ods"].includes(ext)) Icon = FileSpreadsheet;
+  else if (["py", "sh", "bash", "ts", "tsx", "js", "jsx", "cpp", "c", "h", "hpp", "json", "jsonl", "yaml", "yml", "toml", "patch", "diff"].includes(ext)) Icon = FileCode;
+  else if (kind === "binary") Icon = File;
+  return <Icon className={className} />;
 }
 
 export function RefChip({ r }: { r: Ref }) {
@@ -104,7 +113,7 @@ export function RefChip({ r }: { r: Ref }) {
   const href = r.kind === "commit" ? null : fileHref(r.value);
   if (href || r.kind === "file" || r.kind === "path") {
     const name = r.value.split("/").filter(Boolean).pop() || r.value;
-    const isImage = /\.(png|jpe?g|gif|svg|webp)$/i.test(name);
+    const isImage = /\.(png|jpe?g|gif|svg|webp|bmp|avif)$/i.test(name);
     const inner = (
       <>
         {isImage && href ? (
@@ -112,7 +121,7 @@ export function RefChip({ r }: { r: Ref }) {
           // eslint-disable-next-line @next/next/no-img-element
           <img src={href} alt="" className="size-4 shrink-0 rounded object-cover" />
         ) : (
-          <FileIcon name={name} />
+          <FileTypeIcon name={name} />
         )}
         <span className="max-w-[260px] truncate">{name}</span>
       </>

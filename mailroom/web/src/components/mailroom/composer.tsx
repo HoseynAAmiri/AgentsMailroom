@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Forward, ImagePlus, Loader2, Reply, ReplyAll, Send, Tag, X } from "lucide-react";
+import { Forward, Loader2, Paperclip, Reply, ReplyAll, Send, Tag, X } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
@@ -20,10 +20,24 @@ import { useMailroom } from "./context";
 const MODE_LABEL = { new: "New message", reply: "Reply", replyAll: "Reply all", forward: "Forward" } as const;
 const MODE_ICON = { new: Send, reply: Reply, replyAll: ReplyAll, forward: Forward } as const;
 
+function uploadFileName(f: File): string {
+  if (f.name && f.name.trim()) return f.name;
+  const fallbackByMime: Record<string, string> = {
+    "image/png": "image.png",
+    "image/jpeg": "image.jpg",
+    "image/webp": "image.webp",
+    "image/gif": "image.gif",
+    "text/plain": "pasted.txt",
+    "application/pdf": "document.pdf",
+  };
+  return fallbackByMime[f.type] || "attachment.bin";
+}
+
 export function Composer({ inline }: { inline?: boolean }) {
   const { compose, updateCompose, discardCompose, saveDraft, send, sending } = useMailroom();
   const [confirmClose, setConfirmClose] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [taskChoices, setTaskChoices] = useState<{ id: string; title: string }[]>();
   const [taskPickerOpen, setTaskPickerOpen] = useState(false);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
@@ -44,16 +58,24 @@ export function Composer({ inline }: { inline?: boolean }) {
   if (!compose) return null;
 
   const attach = async (files: Iterable<File>) => {
-    const imgs = [...files].filter((f) => f.type.startsWith("image/"));
-    if (!imgs.length) return;
+    const list = [...files];
+    if (!list.length) return;
     setUploading(true);
+    let nextRefs = [...compose.refs];
+    let attached = 0;
     try {
-      for (const f of imgs) {
-        const out = await api.uploadAttachment(f, f.name || "image.png");
+      for (const f of list) {
+        const out = await api.uploadAttachment(f, uploadFileName(f), compose.taskId || undefined);
         const ref = { kind: "file", value: `coordination/attachments/${out.name}` };
-        if (!compose.refs.some((r) => r.kind === ref.kind && r.value === ref.value)) updateCompose({ refs: [...compose.refs, ref] });
+        if (!nextRefs.some((r) => r.kind === ref.kind && r.value === ref.value)) {
+          nextRefs = [...nextRefs, ref];
+        }
+        attached += 1;
+        updateCompose({ refs: nextRefs });
       }
-      toast.success(`${imgs.length} image${imgs.length === 1 ? "" : "s"} attached`);
+      if (attached > 0) {
+        toast.success(`${attached} file${attached === 1 ? "" : "s"} attached`);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Upload failed");
     } finally {
@@ -67,7 +89,29 @@ export function Composer({ inline }: { inline?: boolean }) {
   return (
     <div
       ref={rootRef}
-      className={cn("flex flex-col rounded-lg border bg-card shadow-sm", inline ? "mt-4" : "h-full rounded-none border-0 shadow-none")}
+      className={cn(
+        "flex flex-col rounded-lg border bg-card shadow-sm",
+        inline ? "mt-4" : "h-full rounded-none border-0 shadow-none",
+        dragging && "ring-2 ring-primary/60",
+      )}
+      onDragOver={(e) => {
+        if (uploading || sending) return;
+        if (e.dataTransfer?.types?.includes("Files")) {
+          e.preventDefault();
+          if (!dragging) setDragging(true);
+        }
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+      }}
+      onDrop={(e) => {
+        setDragging(false);
+        if (uploading || sending) return;
+        if (e.dataTransfer?.files?.length) {
+          e.preventDefault();
+          void attach(e.dataTransfer.files);
+        }
+      }}
       onKeyDown={(e) => {
         if (sending || confirmClose) return;
         if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
@@ -136,7 +180,7 @@ export function Composer({ inline }: { inline?: boolean }) {
             void attach(e.clipboardData.files);
           }
         }}
-        placeholder="Write your message…  (paste or attach images)"
+        placeholder="Write your message…  (paste, drop, or attach any file)"
         className={cn(
           "resize-none rounded-none border-0 px-4 py-3 text-sm shadow-none focus-visible:ring-0 dark:bg-transparent",
           inline ? "min-h-40" : "min-h-0 flex-1",
@@ -144,27 +188,41 @@ export function Composer({ inline }: { inline?: boolean }) {
       />
       {compose.refs.length > 0 && (
         <div className="flex flex-wrap gap-1.5 px-4 pb-2">
-          {compose.refs.map((r) => (
-            <RefChip key={`${r.kind}:${r.value}`} r={r} />
-          ))}
+          {compose.refs.map((r, idx) => {
+            const label = r.value.split("/").filter(Boolean).pop() || r.value;
+            return (
+              <span key={`${r.kind}:${r.value}`} className="inline-flex items-center gap-0.5">
+                <RefChip r={r} />
+                <button
+                  type="button"
+                  aria-label={`Remove ${label}`}
+                  title={`Remove ${label}`}
+                  disabled={uploading || sending}
+                  onClick={() => updateCompose({ refs: compose.refs.filter((_, j) => j !== idx) })}
+                  className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                >
+                  <X className="size-3" />
+                </button>
+              </span>
+            );
+          })}
         </div>
       )}
       <div className="flex items-center gap-2 border-t px-3 py-1.5 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] sm:py-2">
         <input
           ref={fileRef}
           type="file"
-          accept="image/*"
           multiple
           className="hidden"
           onChange={(e) => void attach(e.target.files ?? [])}
         />
         <Tooltip>
           <TooltipTrigger
-            render={<Button variant="ghost" size="icon-sm" className="touch:size-9" aria-label="Attach image" disabled={uploading || sending} onClick={() => fileRef.current?.click()} />}
+            render={<Button type="button" variant="ghost" size="icon-sm" className="touch:size-9" aria-label="Attach files" disabled={uploading || sending} onClick={() => fileRef.current?.click()} />}
           >
-            {uploading ? <Loader2 className="animate-spin" /> : <ImagePlus />}
+            {uploading ? <Loader2 className="animate-spin" /> : <Paperclip />}
           </TooltipTrigger>
-          <TooltipContent>Attach image (or paste into the text)</TooltipContent>
+          <TooltipContent>Attach files (or paste or drop here)</TooltipContent>
         </Tooltip>
         <span className="hidden text-xs text-muted-foreground sm:inline">{compose.body.length} chars · draft saved</span>
         <Tooltip>

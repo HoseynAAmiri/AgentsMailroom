@@ -30,9 +30,14 @@ export const api = {
   send: (m: OutgoingMessage) => post<BusEvent>("/api/events", { type: "message", from: "user", ...m }),
   uploadAttachment: async (file: Blob, name: string, taskId?: string) => {
     const url = taskId ? `/api/attachments?task_id=${encodeURIComponent(taskId)}` : "/api/attachments";
+    const asciiName = name.replace(/[^\x20-\x7e]/g, "_") || "attachment";
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": file.type || "application/octet-stream", "X-Filename": name },
+      headers: {
+        "Content-Type": file.type || "application/octet-stream",
+        "X-Filename": asciiName,
+        "X-Filename-UTF8": encodeURIComponent(name),
+      },
       body: file,
     });
     const data = res.status === 204 ? {} : ((await res.json().catch(() => ({}))) as { error?: string; name?: string; url?: string; link_warning?: string; export_warning?: string });
@@ -102,13 +107,61 @@ export function fileHref(value: string): string | null {
   return `/repo/${rel.split("/").map(encodeURIComponent).join("/")}`;
 }
 
-export type FileKind = "image" | "pdf" | "markdown" | "json" | "text";
+export type FileKind = "image" | "pdf" | "markdown" | "json" | "text" | "audio" | "video" | "binary";
+export type AttachmentCategory = "image" | "pdf" | "text" | "data" | "other";
+
+const IMAGE_EXT = new Set(["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico", "avif"]);
+const AUDIO_EXT = new Set(["mp3", "wav", "ogg", "m4a", "flac", "aac"]);
+const VIDEO_EXT = new Set(["mp4", "webm", "mov", "m4v", "ogv"]);
+const TEXT_VIEW_EXT = new Set([
+  "md", "markdown", "txt", "log", "json", "jsonl", "csv", "tsv",
+  "py", "sh", "bash", "zsh", "patch", "diff", "yaml", "yml", "toml",
+  "input", "cpp", "cc", "cxx", "c", "h", "hpp", "hh", "ts", "tsx",
+  "js", "jsx", "mjs", "cjs", "css", "scss", "xml", "html", "htm",
+  "tex", "bib", "rst", "ini", "cfg", "conf", "sql", "r", "m", "f90",
+  "cmake", "out", "err", "stdout", "stderr", "curve", "orig", "lock",
+]);
+const TEXT_CATEGORY_EXT = new Set([
+  "md", "markdown", "txt", "log", "rst", "tex", "bib", "rtf",
+  "doc", "docx", "odt", "out", "err", "stdout", "stderr",
+]);
+const DATA_CATEGORY_EXT = new Set([
+  "json", "jsonl", "csv", "tsv", "py", "sh", "bash", "zsh", "patch", "diff",
+  "yaml", "yml", "toml", "input", "cpp", "cc", "cxx", "c", "h", "hpp", "hh",
+  "ts", "tsx", "js", "jsx", "mjs", "cjs", "css", "scss", "xml", "html", "htm",
+  "ini", "cfg", "conf", "sql", "r", "m", "f90", "cmake",
+  "xls", "xlsx", "ods", "msh", "curve", "npz", "npy", "h5", "hdf5", "vtk", "vtu", "ex2", "dat",
+]);
+
+export function fileExtension(name: string): string {
+  const base = name.split("/").filter(Boolean).pop() ?? "";
+  const dot = base.lastIndexOf(".");
+  if (dot <= 0 || dot === base.length - 1) return "";
+  return base.slice(dot + 1).toLowerCase();
+}
 
 export function fileKind(name: string): FileKind {
-  const n = name.toLowerCase();
-  if (/\.(png|jpe?g|gif|svg|webp)$/.test(n)) return "image";
-  if (n.endsWith(".pdf")) return "pdf";
-  if (n.endsWith(".md")) return "markdown";
-  if (/\.(json|jsonl)$/.test(n)) return "json";
-  return "text";
+  const ext = fileExtension(name);
+  if (IMAGE_EXT.has(ext)) return "image";
+  if (ext === "pdf") return "pdf";
+  if (ext === "md" || ext === "markdown") return "markdown";
+  if (ext === "json" || ext === "jsonl") return "json";
+  if (AUDIO_EXT.has(ext)) return "audio";
+  if (VIDEO_EXT.has(ext)) return "video";
+  if (!ext || TEXT_VIEW_EXT.has(ext)) return "text";
+  return "binary";
+}
+
+export function fileCategory(name: string): AttachmentCategory {
+  const ext = fileExtension(name);
+  if (IMAGE_EXT.has(ext)) return "image";
+  if (ext === "pdf") return "pdf";
+  if (!ext || TEXT_CATEGORY_EXT.has(ext)) return "text";
+  if (DATA_CATEGORY_EXT.has(ext)) return "data";
+  return "other";
+}
+
+export function attachmentDownloadHref(href: string): string {
+  if (!href.startsWith("/attach/")) return href;
+  return href.includes("?") ? `${href}&download=1` : `${href}?download=1`;
 }

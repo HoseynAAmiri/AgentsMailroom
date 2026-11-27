@@ -9,6 +9,7 @@ import tempfile
 import time
 import unittest
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -117,6 +118,75 @@ class StandaloneSmoke(unittest.TestCase):
                 self.assertEqual(read(admin, "/attach/" + uploaded["name"]), b"Review note")
                 detail = read(admin, "/api/todo?id=G1.1")
                 self.assertIn(uploaded["name"], json.dumps(detail))
+
+                # Non-image formats (.md, .pdf, .zip, .html sanitized to text/plain, .svg sandboxed,
+                # extensionless UTF-8 vs binary, and Unicode filename) upload, list, link, and serve safely.
+                md_up = read(admin, "/api/attachments", post=b"# Summary\n", headers={"X-Filename": "summary.md"})
+                pdf_up = read(admin, "/api/attachments", post=b"%PDF-1.4\n%test\n", headers={"X-Filename": "report.pdf"})
+                zip_up = read(admin, "/api/attachments?task_id=G1.1", post=b"PK\x03\x04\x00\x00binary",
+                              headers={"X-Filename": "bundle.zip"})
+                html_up = read(admin, "/api/attachments", post=b"<h1>Hello</h1><script>x=1</script>",
+                               headers={"X-Filename": "page.html"})
+                svg_up = read(admin, "/api/attachments", post=b"<svg xmlns='http://www.w3.org/2000/svg'></svg>",
+                              headers={"X-Filename": "icon.svg"})
+                txt_noext = read(admin, "/api/attachments", post=b"Plain UTF-8 README\n",
+                                 headers={"X-Filename": "README"})
+                bin_noext = read(admin, "/api/attachments", post=b"\x00\xff\x01\x02rawbin",
+                                 headers={"X-Filename": "rawblob"})
+                uni_up = read(admin, "/api/attachments", post=b"Unicode file",
+                              headers={"X-Filename": "note.txt", "X-Filename-UTF8": quote("résumé file.txt")})
+                self.assertEqual(uni_up["name"], "résumé file.txt")
+
+                listed = read(admin, "/api/attachments?refresh=1")
+                listed_names = {row["name"] for row in listed}
+                for expected in (uploaded["name"], md_up["name"], pdf_up["name"], zip_up["name"],
+                                 html_up["name"], svg_up["name"], txt_noext["name"], bin_noext["name"], uni_up["name"]):
+                    self.assertIn(expected, listed_names)
+                self.assertIn(f"coordination/attachments/{zip_up['name']}", read(admin, "/api/todo?id=G1.1")["files"])
+
+                def inspect_attach(rel_name: str, qs: str = "") -> tuple[str, str, str, str, bytes]:
+                    with urlopen(f"http://127.0.0.1:{admin}/attach/{quote(rel_name)}{qs}", timeout=3) as resp:
+                        return (
+                            resp.headers.get("Content-Type", ""),
+                            resp.headers.get("Content-Disposition", ""),
+                            resp.headers.get("X-Content-Type-Options", ""),
+                            resp.headers.get("Content-Security-Policy", ""),
+                            resp.read(),
+                        )
+
+                ct_html, cd_html, nosniff_html, _, body_html = inspect_attach(html_up["name"])
+                self.assertEqual(ct_html, "text/plain; charset=utf-8")
+                self.assertEqual(cd_html, "")
+                self.assertEqual(nosniff_html, "nosniff")
+                self.assertIn(b"<script>", body_html)
+
+                ct_svg, _, nosniff_svg, csp_svg, _ = inspect_attach(svg_up["name"])
+                self.assertEqual(ct_svg, "image/svg+xml")
+                self.assertEqual(nosniff_svg, "nosniff")
+                self.assertEqual(csp_svg, "sandbox")
+
+                ct_zip, cd_zip, nosniff_zip, _, body_zip = inspect_attach(zip_up["name"])
+                self.assertIn(ct_zip, ("application/zip", "application/x-zip-compressed", "application/octet-stream"))
+                self.assertIn("attachment;", cd_zip)
+                self.assertEqual(nosniff_zip, "nosniff")
+                self.assertTrue(body_zip.startswith(b"PK\x03\x04"))
+
+                ct_pdf, cd_pdf, nosniff_pdf, _, _ = inspect_attach(pdf_up["name"])
+                self.assertEqual(ct_pdf, "application/pdf")
+                self.assertEqual(cd_pdf, "")
+                self.assertEqual(nosniff_pdf, "nosniff")
+                _, cd_pdf_dl, _, _, _ = inspect_attach(pdf_up["name"], "?download=1")
+                self.assertIn("attachment;", cd_pdf_dl)
+
+                ct_readme, cd_readme, _, _, body_readme = inspect_attach(txt_noext["name"])
+                self.assertEqual(ct_readme, "text/plain; charset=utf-8")
+                self.assertEqual(cd_readme, "")
+                self.assertEqual(body_readme, b"Plain UTF-8 README\n")
+
+                ct_bin, cd_bin, nosniff_bin, _, _ = inspect_attach(bin_noext["name"])
+                self.assertEqual(ct_bin, "application/octet-stream")
+                self.assertIn("attachment;", cd_bin)
+                self.assertEqual(nosniff_bin, "nosniff")
                 read(admin, "/api/todo", post={"action": "link", "id": "G1.1", "path": "docs/goals-and-tasks/G1/g1_1_demo/context.md"})
                 goals_after = read(admin, "/api/todo")
                 admin_links = goals_after["tasks"][0]["links"]

@@ -4,9 +4,9 @@ import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObjec
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Download, ExternalLink, Loader2, Maximize, Minus, Plus, WrapText, X } from "lucide-react";
+import { Download, ExternalLink, File as FileIcon, Loader2, Maximize, Minus, Plus, WrapText, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { fileKind, type FileKind } from "@/lib/api";
+import { attachmentDownloadHref, fileExtension, fileKind, type FileKind } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { useMailroom, type ViewedFile } from "@/components/mailroom/context";
 
@@ -61,26 +61,26 @@ function usePinchZoom(ref: RefObject<HTMLElement | null>, zoom: number, setZoom:
 /** Pan and zoom with mouse (wheel, drag, double-click) and touch (pinch, drag, double-tap). */
 function ImageView({ src, zoom, setZoom, fitKey }: { src: string; zoom: number; setZoom: (z: number) => void; fitKey: number }) {
   const boxRef = useRef<HTMLDivElement>(null);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [panState, setPanState] = useState({ fitKey, x: 0, y: 0 });
+  const pan = panState.fitKey === fitKey ? { x: panState.x, y: panState.y } : { x: 0, y: 0 };
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
-  const state = useRef({ zoom, pan });
+  const state = useRef({ zoom, pan, fitKey });
   useEffect(() => {
-    state.current = { zoom, pan };
+    state.current = { zoom, pan, fitKey };
   });
-  useEffect(() => setPan({ x: 0, y: 0 }), [fitKey]);
 
   const zoomAt = useCallback(
     (next: number, cx: number, cy: number) => {
       const box = boxRef.current?.getBoundingClientRect();
       if (!box) return;
-      const { zoom: z, pan: p } = state.current;
+      const { zoom: z, pan: p, fitKey: fk } = state.current;
       const nz = clamp(next);
       // keep the point under the cursor/fingers fixed
       const ox = cx - box.left - box.width / 2;
       const oy = cy - box.top - box.height / 2;
       const k = nz / z;
-      setPan({ x: ox - (ox - p.x) * k, y: oy - (oy - p.y) * k });
+      setPanState({ fitKey: fk, x: ox - (ox - p.x) * k, y: oy - (oy - p.y) * k });
       setZoom(nz);
     },
     [setZoom],
@@ -113,7 +113,11 @@ function ImageView({ src, zoom, setZoom, fitKey }: { src: string; zoom: number; 
         const [a, b] = [...pointers.values()];
         zoomAt((pinch.z * Math.hypot(a.x - b.x, a.y - b.y)) / pinch.d, (a.x + b.x) / 2, (a.y + b.y) / 2);
       } else if (pointers.size === 1) {
-        setPan((p) => ({ x: p.x + cur.x - prev.x, y: p.y + cur.y - prev.y }));
+        const fk = state.current.fitKey;
+        setPanState((p) => {
+          const base = p.fitKey === fk ? p : { fitKey: fk, x: 0, y: 0 };
+          return { fitKey: fk, x: base.x + cur.x - prev.x, y: base.y + cur.y - prev.y };
+        });
       }
     };
     const onUp = (e: PointerEvent) => {
@@ -285,28 +289,88 @@ function resolveLocal(link: string, fileHref: string, filePath: string): ViewedF
   return { href: join(fileHref), path: join(filePath) };
 }
 
+function BinaryFallbackView({ name, href, contentType }: { name: string; href: string; contentType?: string }) {
+  const ext = fileExtension(name);
+  return (
+    <div className="flex h-full min-h-40 flex-col items-center justify-center gap-3 p-6 text-center">
+      <FileIcon className="size-10 text-muted-foreground opacity-70" />
+      <div className="space-y-1">
+        <p className="text-sm font-medium">{name}</p>
+        <p className="text-xs text-muted-foreground">
+          Preview is not available in the browser for this format{ext ? ` (.${ext})` : ""}.
+          {contentType ? ` (${contentType})` : ""}
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <Button size="sm" render={<a href={attachmentDownloadHref(href)} download={name} />} nativeButton={false}>
+          <Download /> Download
+        </Button>
+        <Button size="sm" variant="outline" render={<a href={href} target="_blank" rel="noopener" />} nativeButton={false}>
+          <ExternalLink /> Open in new tab
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function AudioView({ src }: { src: string }) {
+  return (
+    <div className="flex h-full min-h-40 items-center justify-center p-6">
+      <audio controls src={src} className="w-full max-w-lg" />
+    </div>
+  );
+}
+
+function VideoView({ src }: { src: string }) {
+  return (
+    <div className="flex h-full min-h-40 items-center justify-center bg-black/80 p-4">
+      <video controls src={src} className="max-h-full max-w-full rounded-md" />
+    </div>
+  );
+}
+
 function TextView({ src, path, kind, name, zoom, setZoom, wrap, raw }: { src: string; path: string; kind: FileKind; name: string; zoom: number; setZoom: (z: number) => void; wrap: boolean; raw: boolean }) {
   const { openFile } = useMailroom();
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [text, setText] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [loadState, setLoadState] = useState<{ src: string; text: string | null; binaryType: string | null; error: string | null }>({
+    src: "",
+    text: null,
+    binaryType: null,
+    error: null,
+  });
   usePinchZoom(scrollRef, zoom, setZoom);
 
   useEffect(() => {
     let dead = false;
-    setText(null);
-    setError(null);
     fetch(src, { cache: "no-store" })
       .then(async (r) => {
         if (!r.ok) throw new Error(r.status === 404 ? "not found on machine A" : `HTTP ${r.status}`);
-        return r.text();
+        const ctype = (r.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+        const disp = (r.headers.get("content-disposition") || "").toLowerCase();
+        if (disp.startsWith("attachment") && !ctype.startsWith("text/") && ctype !== "application/json") {
+          return { binary: true as const, contentType: ctype || "application/octet-stream" };
+        }
+        return { binary: false as const, text: await r.text() };
       })
-      .then((t) => !dead && setText(t))
-      .catch((err) => !dead && setError(err instanceof Error ? err.message : String(err)));
+      .then((res) => {
+        if (dead) return;
+        if (res.binary) setLoadState({ src, text: null, binaryType: res.contentType, error: null });
+        else setLoadState({ src, text: res.text, binaryType: null, error: null });
+      })
+      .catch((err) => !dead && setLoadState({ src, text: null, binaryType: null, error: err instanceof Error ? err.message : String(err) }));
     return () => {
       dead = true;
     };
   }, [src]);
+
+  const active = loadState.src === src ? loadState : null;
+  const text = active?.text ?? null;
+  const binaryType = active?.binaryType ?? null;
+  const error = active?.error ?? null;
+
+  if (binaryType !== null) {
+    return <BinaryFallbackView name={name} href={src} contentType={binaryType} />;
+  }
 
   let body: ReactNode;
   if (error) body = <Centered>Could not open {name}: {error}</Centered>;
@@ -367,20 +431,13 @@ function Centered({ children }: { children: ReactNode }) {
 
 // ---------------------------------------------------------------- dialog
 
-export function FileViewer() {
-  const { viewing, openFile } = useMailroom();
-  const close = useCallback(() => openFile(null), [openFile]);
-
+function FileViewerBody({ viewing }: { viewing: ViewedFile }) {
   const [zoom, setZoom] = useState(1);
   const [fitKey, setFitKey] = useState(0);
   const [wrap, setWrap] = useState(true);
   const [raw, setRaw] = useState(false);
-  useEffect(() => {
-    setZoom(1);
-    setRaw(false);
-  }, [viewing?.href]);
 
-  const name = viewing ? viewing.path.split("/").filter(Boolean).pop() || viewing.path : "";
+  const name = viewing.path.split("/").filter(Boolean).pop() || viewing.path;
   const kind = fileKind(name);
   const step = (k: number) => setZoom((z) => clamp(Math.round(z * k * 100) / 100));
   const reset = () => {
@@ -389,7 +446,6 @@ export function FileViewer() {
   };
 
   useEffect(() => {
-    if (!viewing) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === "+" || e.key === "=") step(1.25);
@@ -400,67 +456,84 @@ export function FileViewer() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [viewing]);
+  }, []);
+
+  return (
+    <>
+      <div className="flex shrink-0 items-center gap-1 border-b px-2 py-1.5 pt-[max(0.375rem,env(safe-area-inset-top))] sm:px-3">
+        <div className="min-w-0 flex-1 px-1">
+          <DialogPrimitive.Title className="truncate text-sm font-semibold">{name}</DialogPrimitive.Title>
+          <p className="truncate font-mono text-[11px] text-muted-foreground" title={viewing.path}>
+            {viewing.path}
+          </p>
+        </div>
+        {kind === "markdown" || kind === "json" ? (
+          <Button variant="ghost" size="sm" onClick={() => setRaw((r) => !r)} className={cn(raw && "tool-active")}>
+            Raw
+          </Button>
+        ) : null}
+        {(kind === "text" || kind === "json" || (kind === "markdown" && raw)) && (
+          <Button variant="ghost" size="icon-sm" aria-label="Wrap lines" title="Wrap lines" onClick={() => setWrap((w) => !w)} className={cn("hidden sm:inline-flex", wrap && "tool-active")}>
+            <WrapText />
+          </Button>
+        )}
+        {kind !== "binary" && kind !== "audio" && kind !== "video" && (
+          <>
+            <div className="flex items-center rounded-lg border">
+              <Button variant="ghost" size="icon-sm" aria-label="Zoom out" onClick={() => step(0.8)}>
+                <Minus />
+              </Button>
+              <button type="button" onClick={reset} title="Reset zoom" className="w-11 text-center font-mono text-[11px] tabular-nums text-muted-foreground hover:text-foreground">
+                {Math.round(zoom * 100)}%
+              </button>
+              <Button variant="ghost" size="icon-sm" aria-label="Zoom in" onClick={() => step(1.25)}>
+                <Plus />
+              </Button>
+            </div>
+            <Button variant="ghost" size="icon-sm" aria-label="Fit" title="Fit" onClick={reset} className="hidden sm:inline-flex">
+              <Maximize />
+            </Button>
+          </>
+        )}
+        <Button variant="ghost" size="icon-sm" aria-label="Open in new tab" title="Open in new tab" render={<a href={viewing.href} target="_blank" rel="noopener" />} nativeButton={false}>
+          <ExternalLink />
+        </Button>
+        <Button variant="ghost" size="icon-sm" aria-label="Download" title="Download" render={<a href={attachmentDownloadHref(viewing.href)} download={name} />} nativeButton={false} className="hidden sm:inline-flex">
+          <Download />
+        </Button>
+        <DialogPrimitive.Close render={<Button variant="ghost" size="icon-sm" aria-label="Close" />}>
+          <X />
+        </DialogPrimitive.Close>
+      </div>
+      <div className="min-h-0 flex-1 pb-[env(safe-area-inset-bottom)]">
+        {kind === "image" ? (
+          <ImageView src={viewing.href} zoom={zoom} setZoom={setZoom} fitKey={fitKey} />
+        ) : kind === "pdf" ? (
+          <PdfView src={viewing.href} zoom={zoom} setZoom={setZoom} />
+        ) : kind === "audio" ? (
+          <AudioView src={viewing.href} />
+        ) : kind === "video" ? (
+          <VideoView src={viewing.href} />
+        ) : kind === "binary" ? (
+          <BinaryFallbackView name={name} href={viewing.href} />
+        ) : (
+          <TextView src={viewing.href} path={viewing.path} kind={kind} name={name} zoom={zoom} setZoom={setZoom} wrap={wrap} raw={raw} />
+        )}
+      </div>
+    </>
+  );
+}
+
+export function FileViewer() {
+  const { viewing, openFile } = useMailroom();
+  const close = useCallback(() => openFile(null), [openFile]);
 
   return (
     <DialogPrimitive.Root open={!!viewing} onOpenChange={(o) => !o && close()}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/50 duration-100 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
         <DialogPrimitive.Popup className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-popover text-popover-foreground outline-none duration-100 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 sm:inset-6 sm:rounded-xl sm:ring-1 sm:ring-foreground/10 lg:inset-x-[max(1.5rem,calc(50vw-36rem))]">
-          {viewing && (
-            <>
-              <div className="flex shrink-0 items-center gap-1 border-b px-2 py-1.5 pt-[max(0.375rem,env(safe-area-inset-top))] sm:px-3">
-                <div className="min-w-0 flex-1 px-1">
-                  <DialogPrimitive.Title className="truncate text-sm font-semibold">{name}</DialogPrimitive.Title>
-                  <p className="truncate font-mono text-[11px] text-muted-foreground" title={viewing.path}>
-                    {viewing.path}
-                  </p>
-                </div>
-                {kind === "markdown" || kind === "json" ? (
-                  <Button variant="ghost" size="sm" onClick={() => setRaw((r) => !r)} className={cn(raw && "tool-active")}>
-                    Raw
-                  </Button>
-                ) : null}
-                {(kind === "text" || kind === "json" || (kind === "markdown" && raw)) && (
-                  <Button variant="ghost" size="icon-sm" aria-label="Wrap lines" title="Wrap lines" onClick={() => setWrap((w) => !w)} className={cn("hidden sm:inline-flex", wrap && "tool-active")}>
-                    <WrapText />
-                  </Button>
-                )}
-                <div className="flex items-center rounded-lg border">
-                  <Button variant="ghost" size="icon-sm" aria-label="Zoom out" onClick={() => step(0.8)}>
-                    <Minus />
-                  </Button>
-                  <button type="button" onClick={reset} title="Reset zoom" className="w-11 text-center font-mono text-[11px] tabular-nums text-muted-foreground hover:text-foreground">
-                    {Math.round(zoom * 100)}%
-                  </button>
-                  <Button variant="ghost" size="icon-sm" aria-label="Zoom in" onClick={() => step(1.25)}>
-                    <Plus />
-                  </Button>
-                </div>
-                <Button variant="ghost" size="icon-sm" aria-label="Fit" title="Fit" onClick={reset} className="hidden sm:inline-flex">
-                  <Maximize />
-                </Button>
-                <Button variant="ghost" size="icon-sm" aria-label="Open in new tab" title="Open in new tab" render={<a href={viewing.href} target="_blank" rel="noopener" />} nativeButton={false}>
-                  <ExternalLink />
-                </Button>
-                <Button variant="ghost" size="icon-sm" aria-label="Download" title="Download" render={<a href={viewing.href} download={name} />} nativeButton={false} className="hidden sm:inline-flex">
-                  <Download />
-                </Button>
-                <DialogPrimitive.Close render={<Button variant="ghost" size="icon-sm" aria-label="Close" />}>
-                  <X />
-                </DialogPrimitive.Close>
-              </div>
-              <div className="min-h-0 flex-1 pb-[env(safe-area-inset-bottom)]">
-                {kind === "image" ? (
-                  <ImageView src={viewing.href} zoom={zoom} setZoom={setZoom} fitKey={fitKey} />
-                ) : kind === "pdf" ? (
-                  <PdfView src={viewing.href} zoom={zoom} setZoom={setZoom} />
-                ) : (
-                  <TextView src={viewing.href} path={viewing.path} kind={kind} name={name} zoom={zoom} setZoom={setZoom} wrap={wrap} raw={raw} />
-                )}
-              </div>
-            </>
-          )}
+          {viewing && <FileViewerBody key={viewing.href} viewing={viewing} />}
         </DialogPrimitive.Popup>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>

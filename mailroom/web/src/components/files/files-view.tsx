@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { FileImage, FileText, FileType, Link2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Download, FileText, Link2, Loader2, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { api } from "@/lib/api";
+import { api, attachmentDownloadHref, fileCategory, fileExtension, type AttachmentCategory } from "@/lib/api";
 import { toast } from "sonner";
 import { ago, fullTime } from "@/lib/format";
 import type { Attachment } from "@/lib/types";
@@ -11,11 +11,11 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SearchableSelect, type SearchOption } from "@/components/ui/searchable-select";
-import { Tip } from "@/components/mailroom/bits";
+import { FileTypeIcon, Tip } from "@/components/mailroom/bits";
 import { FILES_HEADER_CLS, FILES_TOOLBAR_CLS, FilesSkeleton } from "@/components/mailroom/page-skeletons";
 import { useMailroom } from "@/components/mailroom/context";
 
-type Kind = "image" | "pdf" | "data";
+type Kind = AttachmentCategory;
 type FileSort = "newest" | "oldest" | "name" | "size";
 
 const FILE_SORTS: SearchOption<FileSort>[] = [
@@ -26,23 +26,11 @@ const FILE_SORTS: SearchOption<FileSort>[] = [
 ];
 const FILE_PAGE_SIZE = 60;
 
-function icon(name: string) {
-  if (/\.(png|jpe?g|gif|svg|webp)$/i.test(name)) return FileImage;
-  if (/\.pdf$/i.test(name)) return FileType;
-  return FileText;
-}
-
-function kind(name: string): Kind {
-  if (/\.(png|jpe?g|gif|svg|webp)$/i.test(name)) return "image";
-  if (/\.pdf$/i.test(name)) return "pdf";
-  return "data";
-}
-
 function size(n: number) {
   return n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n > 1024 ? `${Math.round(n / 1024)} kB` : `${n} B`;
 }
 
-const KIND_LABEL: Record<Kind, string> = { image: "Images", pdf: "PDFs", data: "Data & text" };
+const KIND_LABEL: Record<Kind, string> = { image: "Images", pdf: "PDFs", text: "Text", data: "Data & code", other: "Other" };
 
 export function FilesView() {
   const { search, events, openEvent, openFile, snap, registerViewRefresh } = useMailroom();
@@ -50,16 +38,19 @@ export function FilesView() {
   const [linkTask, setLinkTask] = useState("");
   const [linkBusy, setLinkBusy] = useState(false);
   const [linkChoices, setLinkChoices] = useState<{ id: string; title: string }[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const uploadRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<Attachment[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [type, setType] = useState<"all" | Kind>("all");
+  const [format, setFormat] = useState("all");
   const [folder, setFolder] = useState("all");
   const [cited, setCited] = useState("all");
   const [sort, setSort] = useState<FileSort>("newest");
 
   const [page, setPage] = useState({ filterKey: "", limit: FILE_PAGE_SIZE });
-  const filterKey = JSON.stringify([search, type, folder, cited, sort]);
+  const filterKey = JSON.stringify([search, type, format, folder, cited, sort]);
   const limit = page.filterKey === filterKey ? page.limit : FILE_PAGE_SIZE;
 
   const load = useCallback((refresh = false) => {
@@ -85,6 +76,14 @@ export function FilesView() {
     return m;
   }, [events]);
 
+  const formats = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const f of files) {
+      const ext = fileExtension(f.name) || "(none)";
+      counts.set(ext, (counts.get(ext) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, [files]);
   const folders = useMemo(() => [...new Set(files.map((f) => (f.name.includes("/") ? f.name.slice(0, f.name.lastIndexOf("/")) : "")))].sort(), [files]);
   const citers = useMemo(() => [...new Set(citedBy.values())].sort((a, b) => b.localeCompare(a, undefined, { numeric: true })), [citedBy]);
 
@@ -92,7 +91,9 @@ export function FilesView() {
     const q = search.trim().toLowerCase();
     let out = files.filter((f) => {
       if (q && !f.name.toLowerCase().includes(q)) return false;
-      if (type !== "all" && kind(f.name) !== type) return false;
+      if (type !== "all" && fileCategory(f.name) !== type) return false;
+      const extKey = fileExtension(f.name) || "(none)";
+      if (format !== "all" && extKey !== format) return false;
       if (folder !== "all" && (f.name.includes("/") ? f.name.slice(0, f.name.lastIndexOf("/")) : "") !== folder) return false;
       if (cited !== "all" && citedBy.get(f.name) !== cited) return false;
       return true;
@@ -104,17 +105,52 @@ export function FilesView() {
       return b.modified.localeCompare(a.modified);
     });
     return out;
-  }, [files, search, type, folder, cited, citedBy, sort]);
+  }, [files, search, type, format, folder, cited, citedBy, sort]);
 
   const chip = (on: boolean) =>
     cn("rounded-full border px-2.5 py-0.5 text-xs", on ? "tool-active border-transparent" : "hover:bg-muted");
+
+  const uploadFiles = async (selected: Iterable<File>) => {
+    const picked = [...selected];
+    if (!picked.length) return;
+    setUploading(true);
+    let uploaded = 0;
+    try {
+      for (const f of picked) {
+        await api.uploadAttachment(f, f.name || "attachment.bin");
+        uploaded += 1;
+      }
+      toast.success(`${uploaded} file${uploaded === 1 ? "" : "s"} uploaded`);
+      await load(true);
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "Upload failed");
+      if (uploaded > 0) await load(true);
+    } finally {
+      setUploading(false);
+      if (uploadRef.current) uploadRef.current.value = "";
+    }
+  };
 
   return (
     <div className="flex h-full flex-col">
       <div className={FILES_HEADER_CLS}>
         <h2 className="text-base font-semibold">Attachments</h2>
         <span className="hidden text-sm text-muted-foreground sm:inline">coordination/attachments · {list.length} files</span>
-        {loading && files.length > 0 && <span role="status" className="ml-auto text-xs text-muted-foreground">Refreshing…</span>}
+        {loading && files.length > 0 && <span role="status" className="text-xs text-muted-foreground">Refreshing…</span>}
+        {snap?.capabilities?.admin && (
+          <div className="ml-auto flex items-center gap-2">
+            <input
+              ref={uploadRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => void uploadFiles(e.target.files ?? [])}
+            />
+            <Button type="button" size="sm" variant="outline" disabled={uploading} onClick={() => uploadRef.current?.click()}>
+              {uploading ? <Loader2 className="animate-spin" /> : <Upload />} Upload
+            </Button>
+          </div>
+        )}
       </div>
       <div className={FILES_TOOLBAR_CLS}>
         <div className="flex flex-wrap items-center gap-1">
@@ -128,6 +164,15 @@ export function FilesView() {
           ))}
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
+          <SearchableSelect compact label="Filter by format" searchPlaceholder="Find a format…"
+            value={format} onChange={setFormat} options={[
+              { value: "all", label: "Any format", triggerLabel: "Format" },
+              ...formats.map(([ext, count]) => ({
+                value: ext,
+                label: ext === "(none)" ? `No extension (${count})` : `.${ext} (${count})`,
+                triggerLabel: ext === "(none)" ? "No ext" : `.${ext}`,
+              })),
+            ]} />
           <SearchableSelect compact label="Filter by folder" searchPlaceholder="Find a folder…"
             value={folder} onChange={setFolder} options={[
               { value: "all", label: "Any folder", triggerLabel: "Folder" },
@@ -147,12 +192,13 @@ export function FilesView() {
         {loading && files.length === 0 ? <FilesSkeleton /> : <>
         <div className="divide-y">
           {list.slice(0, limit).map((f) => {
-            const Icon = icon(f.name);
             const ev = citedBy.get(f.name);
             const href = `/attach/${f.name.split("/").map(encodeURIComponent).join("/")}`;
+            const baseName = f.name.split("/").filter(Boolean).pop() || f.name;
+            const ext = fileExtension(f.name);
             return (
               <div key={f.name} className="flex items-center gap-3 px-3 py-2.5 text-sm hover:bg-muted/50 sm:px-4 sm:py-2">
-                <Icon className="size-4 shrink-0 text-sky-500" />
+                <FileTypeIcon name={f.name} className="size-4 shrink-0 text-sky-500" />
                 <Tip label={f.name} side="top" className="min-w-0 flex-1">
                   <a
                     href={href}
@@ -168,6 +214,11 @@ export function FilesView() {
                     {f.name}
                   </a>
                 </Tip>
+                {ext && (
+                  <span className="hidden rounded border px-1.5 py-0.5 font-mono text-[10px] uppercase text-muted-foreground md:inline">
+                    {ext}
+                  </span>
+                )}
                 {ev && (
                   <Tip label={`Open email ${ev}`} className="shrink-0">
                     <button type="button" onClick={() => openEvent(ev)} className="text-xs text-primary hover:underline">
@@ -175,7 +226,17 @@ export function FilesView() {
                     </button>
                   </Tip>
                 )}
-                {snap?.capabilities?.admin && <Button size="icon-sm" variant="ghost" aria-label={`Link ${f.name} to a task`} title="Link to a task" onClick={async () => {
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label={`Download ${baseName}`}
+                  title="Download"
+                  render={<a href={attachmentDownloadHref(href)} download={baseName} />}
+                  nativeButton={false}
+                >
+                  <Download />
+                </Button>
+                {snap?.capabilities?.admin && <Button type="button" size="icon-sm" variant="ghost" aria-label={`Link ${f.name} to a task`} title="Link to a task" onClick={async () => {
                   setLinkPath(`coordination/attachments/${f.name}`);
                   setLinkTask("");
                   try { setLinkChoices((await api.goalChoices()).tasks); }

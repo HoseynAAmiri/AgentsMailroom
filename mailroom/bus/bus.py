@@ -20,6 +20,7 @@ import fcntl
 import ipaddress
 import io
 import json
+import mimetypes
 import os
 import re
 import secrets
@@ -135,11 +136,11 @@ def todo_mutation(values, *, admin: bool):
                 raise TodoError("Unknown message ID", 404)
     if values.get("action") in ("link", "unlink"):
         path = relative_file(values.get("path"))
-        if Path(path).suffix.lower() not in TEXT_EXT and Path(path).suffix.lower() not in MIME:
-            raise TodoError("Use a file format supported by the Mailroom viewer")
         target, root = logical_file(path)
         if not viewable_path(target, root):
             raise TodoError("Use a workspace file or a Mailroom attachment")
+        if root != ATTACH_DIR and Path(path).suffix.lower() not in TEXT_EXT and Path(path).suffix.lower() not in MIME:
+            raise TodoError("Use a file format supported by the Mailroom viewer")
         values = {**values, "path": path}
     store = todo_store()
     if not store.initialized():
@@ -1041,11 +1042,77 @@ def machine_memory() -> dict[str, float]:
             "swap_used_gib": round(info.get("SwapTotal", 0) - info.get("SwapFree", 0), 1)}
 
 
-TEXT_EXT = {".md", ".txt", ".log", ".json", ".jsonl", ".csv", ".py", ".sh", ".patch", ".diff", ".yaml", ".yml", ".toml", ".input", ".cpp", ".h", ".ts", ".tsx"}
-MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".svg": "image/svg+xml",
-        ".webp": "image/webp", ".pdf": "application/pdf"}
+TEXT_EXT = {
+    ".md", ".markdown", ".txt", ".log", ".json", ".jsonl", ".csv", ".tsv",
+    ".py", ".sh", ".bash", ".zsh", ".patch", ".diff", ".yaml", ".yml", ".toml",
+    ".input", ".cpp", ".cc", ".cxx", ".c", ".h", ".hpp", ".hh", ".ts", ".tsx",
+    ".js", ".jsx", ".mjs", ".cjs", ".css", ".scss", ".xml", ".html", ".htm",
+    ".tex", ".bib", ".rst", ".ini", ".cfg", ".conf", ".sql", ".r", ".m", ".f90",
+    ".cmake", ".out", ".err", ".stdout", ".stderr", ".curve", ".orig", ".lock",
+}
+MIME = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".svg": "image/svg+xml", ".webp": "image/webp",
+    ".bmp": "image/bmp", ".ico": "image/x-icon", ".avif": "image/avif",
+    ".pdf": "application/pdf",
+    ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg", ".m4a": "audio/mp4",
+    ".mp4": "video/mp4", ".webm": "video/webm",
+}
+_UNSAFE_INLINE_MIME = {
+    "text/html",
+    "application/xhtml+xml",
+    "image/svg+xml",
+    "text/javascript",
+    "application/javascript",
+    "application/x-javascript",
+    "text/xml",
+    "application/xml",
+}
 VIEW_MAX_BYTES = 64 * 1024 * 1024
 UPLOAD_MAX_BYTES = 32 * 1024 * 1024
+
+
+def _looks_utf8_text(sample: bytes) -> bool:
+    """Return True if a prefix looks like valid non-NUL UTF-8 text."""
+    if b"\x00" in sample:
+        return False
+    for trim in range(4 if len(sample) >= 8192 else 1):
+        chunk = sample[:len(sample) - trim] if trim else sample
+        try:
+            chunk.decode("utf-8")
+            return True
+        except UnicodeDecodeError:
+            continue
+    return False
+
+
+def _content_disposition_attachment(filename: str) -> str:
+    """Build an RFC 5987 safe Content-Disposition attachment header."""
+    clean = re.sub(r"[\r\n\"\\]+", "_", filename).strip() or "attachment"
+    ascii_name = clean.encode("ascii", "replace").decode("ascii")
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(clean)}"
+
+
+def _attachment_response_headers(path: Path, body: bytes, *, force_download: bool = False) -> tuple[str, dict[str, str]]:
+    """Choose a safe Content-Type and response headers for any attachment format."""
+    ext = path.suffix.lower()
+    headers = {"X-Content-Type-Options": "nosniff"}
+    if ext in MIME:
+        ctype = MIME[ext]
+        if ext == ".svg":
+            headers["Content-Security-Policy"] = "sandbox"
+    elif ext in TEXT_EXT or _looks_utf8_text(body[:8192]):
+        ctype = "text/plain; charset=utf-8"
+    else:
+        guessed, _ = mimetypes.guess_type(path.name)
+        if not guessed or guessed.lower() in _UNSAFE_INLINE_MIME:
+            ctype = "application/octet-stream"
+        else:
+            ctype = guessed
+        force_download = True
+    if force_download:
+        headers["Content-Disposition"] = _content_disposition_attachment(path.name)
+    return ctype, headers
 
 
 def save_attachment(name: str, raw: bytes) -> dict[str, Any]:
@@ -1061,8 +1128,6 @@ def save_attachment(name: str, raw: bytes) -> dict[str, Any]:
         raise ValueError("bad file name")
     if len(base) > 120:
         raise ValueError("file name too long")
-    if base.lower().rsplit(".", 1)[-1] and f".{base.lower().rsplit('.', 1)[-1]}" not in TEXT_EXT and f".{base.lower().rsplit('.', 1)[-1]}" not in MIME:
-        raise ValueError(f"extension not viewable on the bus (allowed: text/data or {', '.join(sorted(MIME))})")
     ATTACH_DIR.mkdir(parents=True, exist_ok=True)
     candidate = ATTACH_DIR / base
     if candidate.exists():
@@ -1105,9 +1170,7 @@ class AttachmentIndex:
                 if name.startswith("."):
                     continue
                 path = Path(directory) / name
-                if path.suffix.lower() not in TEXT_EXT and path.suffix.lower() not in MIME:
-                    continue
-                if not viewable_path(path, self.path):
+                if not path.is_file() or not viewable_path(path, self.path):
                     continue
                 try:
                     st = path.stat()
@@ -2315,10 +2378,12 @@ class BusHandler(SimpleHTTPRequestHandler):
             self._send_json(200, {"agent": agent_id, "log": session_log(agent_id)})
             return
         if parsed.path.startswith("/attach/"):
-            self.send_attachment(unquote(parsed.path[len("/attach/"):]))
+            force_download = qs.get("download", ["0"])[0] in {"1", "true", "yes"}
+            self.send_attachment(unquote(parsed.path[len("/attach/"):]), force_download=force_download)
             return
         if parsed.path.startswith("/repo/"):
-            self.send_repo_file(unquote(parsed.path[len("/repo/"):]))
+            force_download = qs.get("download", ["0"])[0] in {"1", "true", "yes"}
+            self.send_repo_file(unquote(parsed.path[len("/repo/"):]), force_download=force_download)
             return
         if parsed.path.startswith("/api/inbox/"):
             agent_id = parsed.path.split("/")[-1]
@@ -2328,7 +2393,7 @@ class BusHandler(SimpleHTTPRequestHandler):
             return
         super().do_GET()
 
-    def send_attachment(self, rel: str) -> None:
+    def send_attachment(self, rel: str, *, force_download: bool = False) -> None:
         parts = [p for p in rel.split("/") if p]
         if not parts or any(p.startswith(".") for p in parts):
             self._send_json(404, {"error": "no such attachment"})
@@ -2340,16 +2405,16 @@ class BusHandler(SimpleHTTPRequestHandler):
         except (ValueError, OSError):
             self._send_json(404, {"error": "no such attachment"})
             return
-        self._send_viewable(f)
+        self._send_attachment_file(f, force_download=force_download)
 
-    def send_repo_file(self, rel: str) -> None:
+    def send_repo_file(self, rel: str, *, force_download: bool = False) -> None:
         """Show a supported file inside the configured workspace root."""
         parts = [p for p in rel.split("/") if p]
         if not parts or any(p.startswith(".") for p in parts):
             self._send_json(404, {"error": "no such file"})
             return
         if "/".join(parts).startswith(ATTACH_REF_PREFIX):
-            self.send_attachment("/".join(parts)[len(ATTACH_REF_PREFIX):])
+            self.send_attachment("/".join(parts)[len(ATTACH_REF_PREFIX):], force_download=force_download)
             return
         try:
             file = REPO_DIR.joinpath(*parts).resolve()
@@ -2358,19 +2423,33 @@ class BusHandler(SimpleHTTPRequestHandler):
         except (ValueError, OSError):
             self._send_json(404, {"error": "no such file"})
             return
-        self._send_viewable(file)
+        self._send_viewable(file, force_download=force_download)
 
-    def _send_viewable(self, f: Path) -> None:
+    def _send_bytes_response(self, body: bytes, ctype: str, headers: dict[str, str]) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        for k, v in headers.items():
+            self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_attachment_file(self, f: Path, *, force_download: bool = False) -> None:
+        if not f.is_file() or f.stat().st_size > VIEW_MAX_BYTES:
+            self._send_json(404, {"error": "no such attachment"})
+            return
+        body = f.read_bytes()
+        ctype, headers = _attachment_response_headers(f, body, force_download=force_download)
+        self._send_bytes_response(body, ctype, headers)
+
+    def _send_viewable(self, f: Path, *, force_download: bool = False) -> None:
         ext = f.suffix.lower()
         if not f.is_file() or (ext not in TEXT_EXT and ext not in MIME) or f.stat().st_size > VIEW_MAX_BYTES:
             self._send_json(404, {"error": "no such attachment"})
             return
         body = f.read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", MIME.get(ext, "text/plain; charset=utf-8"))
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        ctype, headers = _attachment_response_headers(f, body, force_download=force_download)
+        self._send_bytes_response(body, ctype, headers)
 
     def do_POST(self) -> None:  # noqa: N802
         if not self.request_allowed():
@@ -2396,7 +2475,9 @@ class BusHandler(SimpleHTTPRequestHandler):
                     self._send_json(exc.status, {"error": str(exc)})
                     return
             try:
-                saved = save_attachment(self.headers.get("X-Filename") or "", body)
+                raw_utf8 = self.headers.get("X-Filename-UTF8") or ""
+                fname = unquote(raw_utf8) if raw_utf8 else (self.headers.get("X-Filename") or "")
+                saved = save_attachment(fname, body)
             except ValueError as exc:
                 self._send_json(400, {"error": str(exc)})
                 return
