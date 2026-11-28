@@ -5,7 +5,18 @@ export type EventType =
   | "task.completed"
   | "task.failed"
   | "human.needed"
+  | "human.resolved"
   | "agent.status";
+
+export type ResolutionChannel = "muse_chat" | "terminal" | "other";
+
+export interface ClickResolution {
+  eventId: string;
+  targetId: string;
+  ts: string;
+  resolved_by_click: true;
+  resolved_via: ResolutionChannel | null;
+}
 
 export interface Ref {
   kind: string;
@@ -26,6 +37,8 @@ export interface BusEvent {
   body: string;
   refs?: Ref[];
   state?: string;
+  resolved_by_click?: boolean;
+  resolved_via?: ResolutionChannel | null;
 }
 
 export interface MailTask {

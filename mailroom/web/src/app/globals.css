@@ -230,9 +230,26 @@ html[data-kb] .mailroom-shell {
 }
 
 /* Keep open modals centered and bounded inside the visual viewport above the on-screen keyboard. */
-html[data-kb] [data-slot="dialog-content"] {
+html[data-kb] [data-slot="dialog-content"],
+html[data-kb] dialog.mr-resolve-dialog[open] {
   top: calc(var(--app-top, 0px) + var(--app-h, 100dvh) / 2);
   max-height: calc(var(--app-h, 100dvh) - 1rem);
+}
+
+/* Native modal <dialog> scroll containment and backdrop styling. */
+dialog:modal {
+  overscroll-behavior: contain;
+}
+dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+dialog.mr-resolve-dialog[open] {
+  display: grid;
+}
+dialog.mr-resolve-dialog::backdrop {
+  background-color: rgb(0 0 0 / 0.2);
+  backdrop-filter: blur(4px);
 }
 
 /* Phones: chrome that gives way to the on-screen keyboard (never hide an element that holds focus). */

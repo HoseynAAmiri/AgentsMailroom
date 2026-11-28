@@ -21,6 +21,7 @@ export interface BusData {
   error: string | null;
   refresh: (opts?: RefreshOptions) => Promise<void>;
   setUserState: (us: UserState) => void;
+  appendEvents: (added: BusEvent[]) => void;
 }
 
 /** Polls /api/snapshot; after the first full load it asks only for events after the last id it holds. */
@@ -106,7 +107,16 @@ export function useBus(): BusData {
     setSnap((s) => (s ? { ...s, user_state: us } : s));
   }, []);
 
-  return { snap, events, snapshotReceivedAt, connected, error, refresh, setUserState };
+  const appendEvents = useCallback((added: BusEvent[]) => {
+    if (!added.length) return;
+    setEvents((prev) => {
+      const seen = new Set(prev.map((e) => e.id));
+      const fresh = added.filter((e) => !seen.has(e.id));
+      return fresh.length ? [...prev, ...fresh] : prev;
+    });
+  }, []);
+
+  return { snap, events, snapshotReceivedAt, connected, error, refresh, setUserState, appendEvents };
 }
 
 export function useNow(intervalMs = 1000): number {

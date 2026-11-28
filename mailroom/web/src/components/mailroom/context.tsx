@@ -7,6 +7,7 @@ import { useBus, useLocalStorage, useNow, type RefreshOptions } from "@/hooks/us
 import { pushBack, useBackLayer, useHistoryRoot } from "@/hooks/use-back-layer";
 import {
   buildThreads,
+  clickResolutions,
   eventTaskId,
   mailState,
   openHumanRequests,
@@ -16,8 +17,9 @@ import {
   type MailState,
   type Thread,
 } from "@/lib/threads";
-import type { Agent, BusEvent, MailTaskIndex, Snapshot } from "@/lib/types";
-import { buildLastActivityMap, displayName, resolveActivityNow } from "@/lib/format";
+import { executeClickResolution, selectResolvableTargets } from "@/lib/resolve-human";
+import type { Agent, BusEvent, ClickResolution, MailTaskIndex, ResolutionChannel, Snapshot } from "@/lib/types";
+import { buildLastActivityMap, displayName, RESOLUTION_CHANNEL_LABEL, resolveActivityNow } from "@/lib/format";
 
 export type View = "goals" | "mail" | "team" | "machine" | "files";
 export type ComposeMode = "new" | "reply" | "replyAll" | "forward";
@@ -52,7 +54,13 @@ interface Ctx {
   threadByEvent: Map<string, Thread>;
   openHuman: BusEvent[];
   openHumanIds: Set<string>;
+  clickResolutions: ReadonlyMap<string, ClickResolution>;
   needsThreadCount: number;
+  resolveTarget: BusEvent[] | null;
+  promptResolve: (targets: BusEvent[]) => void;
+  cancelResolve: () => void;
+  confirmResolve: (via: ResolutionChannel | null) => Promise<boolean>;
+  resolving: boolean;
   view: View;
   setView: (v: View) => void;
   folder: FolderId;
@@ -125,7 +133,7 @@ const MAILBOX_FEEDBACK = {
 } as const;
 
 export function MailroomProvider({ children }: { children: ReactNode }) {
-  const { snap, events, snapshotReceivedAt, connected, error, refresh, setUserState } = useBus();
+  const { snap, events, snapshotReceivedAt, connected, error, refresh, setUserState, appendEvents } = useBus();
   const tickNow = useNow(30000);
   const activityNow = resolveActivityNow(tickNow, snapshotReceivedAt);
   const [view, setViewRaw] = useLocalStorage<View>("mr-view", "mail");
@@ -178,6 +186,8 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
   const compose = draftClosed ? null : draft;
   const savedDraft = draftClosed ? draft : null;
   const [sending, setSending] = useState(false);
+  const [resolveTarget, setResolveTarget] = useState<BusEvent[] | null>(null);
+  const [resolving, setResolving] = useState(false);
   const [summonOpen, setSummonOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [viewing, setViewing] = useState<ViewedFile | null>(null);
@@ -211,9 +221,50 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
   }, [threads]);
   const openHuman = useMemo(() => openHumanRequests(events), [events]);
   const openHumanIds = useMemo(() => new Set(openHuman.map((e) => e.id)), [openHuman]);
+  const resolutions = useMemo(() => clickResolutions(events), [events]);
   const needsThreadCount = useMemo(
     () => openHumanThreads(threads, { ms, openHuman: openHumanIds, agents }).length,
     [threads, ms, openHumanIds, agents],
+  );
+
+  const promptResolve = useCallback(
+    (candidates: BusEvent[]) => {
+      const valid = selectResolvableTargets(candidates, openHumanIds);
+      if (valid.length) setResolveTarget(valid);
+    },
+    [openHumanIds],
+  );
+
+  const cancelResolve = useCallback(() => {
+    if (!resolving) setResolveTarget(null);
+  }, [resolving]);
+
+  const confirmResolve = useCallback(
+    async (via: ResolutionChannel | null) => {
+      if (!resolveTarget?.length || resolving) return false;
+      setResolving(true);
+      try {
+        const created = await executeClickResolution(resolveTarget, via, api.resolveHuman);
+        appendEvents(created);
+        const unreadIds = resolveTarget.filter(ms.isUnread).map((e) => e.id);
+        if (unreadIds.length) {
+          void api.userState("read", unreadIds).then(setUserState).catch(() => {});
+        }
+        const firstId = resolveTarget[0].id;
+        const count = created.length;
+        setResolveTarget(null);
+        const suffix = via ? ` (${RESOLUTION_CHANNEL_LABEL[via]})` : "";
+        toast.success(count === 1 ? `Marked ${firstId} resolved${suffix}` : `Marked ${count} items resolved${suffix}`);
+        void refresh();
+        return true;
+      } catch (err) {
+        toast.error(`Could not mark resolved: ${err instanceof Error ? err.message : err}`);
+        return false;
+      } finally {
+        setResolving(false);
+      }
+    },
+    [resolveTarget, resolving, appendEvents, ms, setUserState, refresh],
   );
 
   const mark = useCallback(
@@ -427,7 +478,13 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
     threadByEvent,
     openHuman,
     openHumanIds,
+    clickResolutions: resolutions,
     needsThreadCount,
+    resolveTarget,
+    promptResolve,
+    cancelResolve,
+    confirmResolve,
+    resolving,
     view,
     setView,
     folder,

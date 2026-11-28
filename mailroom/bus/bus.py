@@ -620,6 +620,8 @@ def _task_id_warning(event: dict[str, Any]) -> str | None:
     """Return a non-blocking validation warning when a post lacks an active G#.# task_id."""
     if event.get("type") == "agent.status" and event.get("state") == "offline":
         return None
+    if event.get("type") == "human.resolved":
+        return None
     state = _tracker_task_state()
     if state is None:
         return None
@@ -793,14 +795,15 @@ def todo_read(params, *, admin: bool):
         if untagged:
             first = bisect_right(index.event_numbers, data["cutover"])
             candidates = index.events[first:]
-            rows = [event for event in reversed(candidates) if event["type"] != "agent.status"
+            rows = [event for event in reversed(candidates) if event["type"] not in {"agent.status", "human.resolved"}
                     and tags.get(event["id"], event.get("task_id")) not in tasks]
             inherited = [event for event in candidates if tags.get(event["id"], event.get("task_id")) in tasks]
         else:
             positions = set(index.by_task.get(item, ()))
             positions.update(index.positions[key] for key, target in tags.items() if target == item and key in index.positions)
             rows = [index.events[pos] for pos in sorted(positions, reverse=True)
-                    if tags.get(index.events[pos]["id"], index.events[pos].get("task_id")) == item]
+                    if index.events[pos].get("type") != "human.resolved"
+                    and tags.get(index.events[pos]["id"], index.events[pos].get("task_id")) == item]
             inherited = rows
     linked = set(files)
     for event in inherited:
@@ -844,8 +847,30 @@ VALID_TYPES = {
     "task.completed",
     "task.failed",
     "human.needed",
+    "human.resolved",
     "agent.status",
 }
+
+RESOLUTION_CHANNELS: dict[str, str] = {
+    "muse_chat": "muse_chat",
+    "muse chat": "muse_chat",
+    "chat": "muse_chat",
+    "terminal": "terminal",
+    "other": "other",
+}
+
+
+def normalize_resolution_channel(raw: Any) -> str | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        raise ValueError("resolved_via must be muse_chat, terminal, other, or empty")
+    cleaned = raw.strip().lower()
+    if not cleaned:
+        return None
+    if cleaned in RESOLUTION_CHANNELS:
+        return RESOLUTION_CHANNELS[cleaned]
+    raise ValueError("resolved_via must be muse_chat, terminal, other, or empty")
 
 # The Team page controls message routes for each installation.
 DEFAULT_LINKS: list[dict[str, str]] = []
@@ -1063,7 +1088,7 @@ class EventIndex:
         if isinstance(event_id, str):
             self.positions.setdefault(event_id, pos)
             self.max_id = max(self.max_id, id_num(event_id))
-        if event.get("type") != "agent.status":
+        if event.get("type") not in {"agent.status", "human.resolved"}:
             addressed = {r for r in recipients(event) if isinstance(r, str)}
             for agent in addressed:
                 self.by_recipient.setdefault(agent, []).append(pos)
@@ -1072,6 +1097,10 @@ class EventIndex:
                 addressed.add(sender)
             for agent in addressed:
                 self.by_participant.setdefault(agent, []).append(pos)
+        elif event.get("type") == "human.resolved":
+            for agent in {event.get("from"), event.get("to")}:
+                if isinstance(agent, str) and agent:
+                    self.by_participant.setdefault(agent, []).append(pos)
         task_id = event.get("task_id")
         if isinstance(task_id, str) and task_id:
             self.by_task.setdefault(task_id, []).append(pos)
@@ -1186,6 +1215,12 @@ def route_error(event: dict[str, Any], data: dict[str, Any] | None = None) -> st
     src, typ = event.get("from"), event.get("type")
     if typ == "agent.status":
         return None if event.get("to") == "*" and not event.get("cc") else "agent.status goes to '*' without cc"
+    if typ == "human.resolved":
+        if src != "user":
+            return "only user may post human.resolved"
+        if event.get("cc") or event.get("to") in {None, "", "*"}:
+            return "human.resolved goes to the requesting agent without cc"
+        return None
     sender = find_agent(data, src)
     if src != "user" and sender and agent_ended(sender):
         return ended_agent_message(sender)
@@ -1266,6 +1301,48 @@ def append_event(event: dict[str, Any], check_route: bool = True) -> dict[str, A
             # sender looks active; keep its status summary (a message is not a status line)
             apply_status(event["from"], None, None)
     return event
+
+
+def resolve_human_needed(in_reply_to: Any, resolved_via: Any = None) -> tuple[dict[str, Any], bool]:
+    """Mark a human.needed event resolved by click without sending a fake text message."""
+    if not isinstance(in_reply_to, str) or not in_reply_to.strip():
+        raise ValueError("in_reply_to is required to resolve a human.needed item")
+    target_id = in_reply_to.strip()
+    via = normalize_resolution_channel(resolved_via)
+    EVENTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with bus_lock():
+        with _EVENT_INDEX.lock:
+            _EVENT_INDEX.refresh()
+            pos = _EVENT_INDEX.positions.get(target_id)
+            if pos is None:
+                raise LookupError(f"unknown event {target_id!r}")
+            target = _EVENT_INDEX.events[pos]
+            if target.get("type") != "human.needed":
+                raise ValueError(f"event {target_id} is {target.get('type')!r}, not 'human.needed'")
+            for existing in _EVENT_INDEX.events[pos + 1:]:
+                if existing.get("type") == "human.resolved" and existing.get("in_reply_to") == target_id:
+                    return existing, False
+            inherited_tid = _inherit_reply_task_id(target_id) or target.get("task_id")
+            event: dict[str, Any] = {
+                "id": f"e{_EVENT_INDEX.max_id + 1:03d}",
+                "ts": utc_now(),
+                "type": "human.resolved",
+                "from": "user",
+                "to": str(target.get("from") or "user"),
+                "task_id": inherited_tid,
+                "parent_task_id": target.get("parent_task_id"),
+                "in_reply_to": target_id,
+                "body": "",
+                "refs": [],
+                "resolved_by_click": True,
+                "resolved_via": via,
+            }
+            with EVENTS_PATH.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(event, ensure_ascii=False) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            _EVENT_INDEX.refresh()
+    return event, True
 
 
 def apply_status(agent_id: str, state: str | None, summary: str | None) -> None:
@@ -1792,6 +1869,8 @@ def list_repo_dir(rel: str) -> dict[str, Any]:
 
 def derive_tasks(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     tasks: dict[str, dict[str, Any]] = {}
+    open_human_by_task: dict[str, dict[str, str]] = {}
+    prev_state_by_task: dict[str, str] = {}
     for ev in events:
         tid = ev.get("task_id")
         if not tid:
@@ -1814,14 +1893,38 @@ def derive_tasks(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             slot["state"] = "started"
             slot["owner"] = ev.get("to")
             slot["title"] = ev.get("body") or slot["title"]
+            prev_state_by_task[tid] = "started"
         elif ev["type"] == "task.blocked":
             slot["state"] = "blocked"
+            prev_state_by_task[tid] = "blocked"
         elif ev["type"] == "task.completed":
             slot["state"] = "completed"
+            prev_state_by_task[tid] = "completed"
+            open_human_by_task.pop(tid, None)
         elif ev["type"] == "task.failed":
             slot["state"] = "failed"
+            prev_state_by_task[tid] = "failed"
         elif ev["type"] == "human.needed":
+            if slot["state"] != "waiting_human":
+                prev_state_by_task[tid] = slot["state"]
+            open_human_by_task.setdefault(tid, {})[str(ev.get("id") or "")] = str(ev.get("from") or "")
             slot["state"] = "waiting_human"
+        elif ev["type"] == "human.resolved" or ev.get("resolved_by_click") is True:
+            pending = open_human_by_task.get(tid)
+            if pending is not None:
+                reply_to = str(ev.get("in_reply_to") or "")
+                if reply_to:
+                    pending.pop(reply_to, None)
+                else:
+                    pending.clear()
+                if not pending and slot["state"] == "waiting_human":
+                    slot["state"] = prev_state_by_task.get(tid, "open")
+        elif ev.get("from") == "user":
+            pending = open_human_by_task.get(tid)
+            if pending is not None:
+                pending.clear()
+                if slot["state"] == "waiting_human":
+                    slot["state"] = prev_state_by_task.get(tid, "open")
     return sorted(tasks.values(), key=lambda t: t.get("updated_at") or "", reverse=True)
 
 
@@ -3118,10 +3221,29 @@ class BusHandler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/events":
+            req_type = data.get("type") or "message"
+            if req_type == "human.resolved":
+                if data.get("from") != "user":
+                    self._send_json(403, {"error": "only user may resolve human.needed items"})
+                    return
+                if str(data.get("body") or "").strip():
+                    self._send_json(400, {"error": "human.resolved does not accept a text body; use message to reply"})
+                    return
+                raw_via = data.get("resolved_via") if "resolved_via" in data else data.get("via")
+                try:
+                    resolved_ev, created = resolve_human_needed(data.get("in_reply_to"), raw_via)
+                except LookupError as exc:
+                    self._send_json(404, {"error": str(exc)})
+                    return
+                except ValueError as exc:
+                    self._send_json(400, {"error": str(exc)})
+                    return
+                self._send_json(201 if created else 200, resolved_ev)
+                return
             event = {
                 "id": data.get("id"),
                 "ts": utc_now() if data.get("from") == "user" else (data.get("ts") or utc_now()),
-                "type": data.get("type") or "message",
+                "type": req_type,
                 "from": data.get("from"),
                 "to": data.get("to"),
                 "cc": [c for c in (data.get("cc") or []) if isinstance(c, str)],

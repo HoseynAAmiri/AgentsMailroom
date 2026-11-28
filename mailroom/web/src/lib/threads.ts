@@ -1,4 +1,4 @@
-import type { Agent, BusEvent, MailTask, MailTaskIndex, Task, UserState } from "./types";
+import type { Agent, BusEvent, ClickResolution, MailTask, MailTaskIndex, Task, UserState } from "./types";
 
 export function idNum(id: string | null | undefined): number {
   const m = String(id ?? "").match(/^e(\d+)$/);
@@ -51,6 +51,27 @@ export function eventTaskId(event: BusEvent, tags?: MailTaskIndex["tags"]) {
   return tags && Object.hasOwn(tags, event.id) ? tags[event.id] : event.task_id ?? null;
 }
 
+export function isClickResolutionEvent(event: BusEvent): boolean {
+  return event.type === "human.resolved" || event.resolved_by_click === true;
+}
+
+export function clickResolutions(events: readonly BusEvent[]): Map<string, ClickResolution> {
+  const map = new Map<string, ClickResolution>();
+  for (const e of events) {
+    if (!isClickResolutionEvent(e) || !e.in_reply_to) continue;
+    if (!map.has(e.in_reply_to)) {
+      map.set(e.in_reply_to, {
+        eventId: e.id,
+        targetId: e.in_reply_to,
+        ts: e.ts,
+        resolved_by_click: true,
+        resolved_via: e.resolved_via ?? null,
+      });
+    }
+  }
+  return map;
+}
+
 export function buildThreads(events: BusEvent[], tasks: Task[], index?: MailTaskIndex): Thread[] {
   const byId = new Map(events.map((e) => [e.id, e]));
   const keyOf = new Map<string, string>();
@@ -70,7 +91,7 @@ export function buildThreads(events: BusEvent[], tasks: Task[], index?: MailTask
   const goalTaskMap = new Map(index?.tasks.map((task) => [task.id, task]));
   const threads = new Map<string, Thread>();
   for (const e of events) {
-    if (e.type === "agent.status") continue;
+    if (e.type === "agent.status" || isClickResolutionEvent(e)) continue;
     const k = resolve(e);
     let t = threads.get(k);
     if (!t) {
@@ -95,17 +116,23 @@ export function buildThreads(events: BusEvent[], tasks: Task[], index?: MailTask
   return [...threads.values()];
 }
 
-/** human.needed events with no USER answer and no completion afterwards. */
+/** human.needed events with no USER answer, click-resolution, or completion afterwards. */
 export function openHumanRequests(events: BusEvent[]): BusEvent[] {
   const open: BusEvent[] = [];
   events.forEach((e, i) => {
     if (e.type !== "human.needed") return;
     const later = events.slice(i + 1);
-    const closed = later.some(
-      (x) =>
+    const closed = later.some((x) => {
+      if (isClickResolutionEvent(x)) {
+        return x.in_reply_to
+          ? x.in_reply_to === e.id
+          : Boolean((e.task_id && x.task_id === e.task_id) || x.to === e.from);
+      }
+      return (
         (x.from === "user" && ((e.task_id && x.task_id === e.task_id) || x.to === e.from || x.in_reply_to === e.id)) ||
-        (e.task_id && x.task_id === e.task_id && x.type === "task.completed"),
-    );
+        (e.task_id && x.task_id === e.task_id && x.type === "task.completed")
+      );
+    });
     if (!closed) open.push(e);
   });
   return open;

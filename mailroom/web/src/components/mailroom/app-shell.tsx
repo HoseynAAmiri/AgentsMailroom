@@ -25,6 +25,7 @@ import { MailroomProvider, useMailroom, type View } from "./context";
 import { FolderPane } from "./folder-pane";
 import { Composer } from "./composer";
 import { ReadingPane } from "./reading-pane";
+import { ResolveHumanDialog } from "./resolve-dialog";
 import { StatusFeed } from "./status-feed";
 import { ThreadList } from "./thread-list";
 import { Tip } from "./bits";
@@ -477,6 +478,7 @@ function Shell() {
         </main>
       </div>
       <SummonDialog />
+      <ResolveHumanDialog />
       <FileViewer />
     </div>
   );

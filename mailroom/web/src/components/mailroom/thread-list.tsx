@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Archive, CheckCheck, Flag, Mail, MailOpen, Menu, Paperclip, Pin, RotateCcw, Trash2 } from "lucide-react";
+import { AlertTriangle, Archive, CheckCheck, CheckCircle2, Flag, Mail, MailOpen, Menu, Paperclip, Pin, RotateCcw, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { matchSnippet, messageHits, sortFolderThreads, TASK_FILTERS, threadInFolder, threadMatches, visibleEvents, snippet, type Thread } from "@/lib/threads";
 import { GOAL_STATE_STYLE, listTime, plainTaskTitle } from "@/lib/format";
@@ -57,7 +57,7 @@ function participantsLine(t: Thread, evs: ReturnType<typeof visibleEvents>) {
 }
 
 function ThreadRow({ t }: { t: Thread }) {
-  const { folder, ms, selected, select, mark, openHumanIds, search } = useMailroom();
+  const { folder, ms, selected, select, mark, openHumanIds, promptResolve, search } = useMailroom();
   const evs = visibleEvents(t, folder, ms);
   const last = evs[evs.length - 1];
   if (!last) return null;
@@ -66,7 +66,8 @@ function ThreadRow({ t }: { t: Thread }) {
   const preview = hits.at(-1) ?? last;
   const unread = evs.filter(ms.isUnread).length;
   const flagged = evs.some(ms.isFlagged);
-  const needs = evs.some((e) => openHumanIds.has(e.id));
+  const openInRow = evs.filter((e) => openHumanIds.has(e.id));
+  const needs = openInRow.length > 0;
   const hasFiles = evs.some((e) => (e.refs ?? []).some((r) => r.kind === "file"));
   const sel = selected === t.key;
   const ids = evs.map((e) => e.id);
@@ -83,7 +84,7 @@ function ThreadRow({ t }: { t: Thread }) {
       tabIndex={0}
       data-thread={t.key}
       onClick={() => select(t.key, { focus: hits.at(-1)?.id ?? null })}
-      onKeyDown={(e) => e.key === "Enter" && select(t.key, { focus: hits.at(-1)?.id ?? null })}
+      onKeyDown={(e) => e.key === "Enter" && e.target === e.currentTarget && select(t.key, { focus: hits.at(-1)?.id ?? null })}
       className={cn(
         "group relative flex cursor-pointer gap-3 rounded-lg border-b border-l-[3px] border-l-transparent px-3 py-2.5 outline-none transition-colors touch:py-3",
         sel ? "tool-active" : cn("hover:bg-muted/60 active:bg-muted", pinned && "bg-amber-500/[0.04] dark:bg-amber-400/[0.06]"),
@@ -120,12 +121,37 @@ function ThreadRow({ t }: { t: Thread }) {
         <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
           {hits.length ? <Highlight text={matchSnippet(preview.body, query)} query={query} /> : snippet(last.body, 220)}
         </p>
+        {folder === "needs" && needs && !deletedView && (
+          <div className="mt-2 flex items-center">
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              aria-label={`Mark resolved: ${title}`}
+              onClick={(ev) => {
+                ev.stopPropagation();
+                promptResolve(openInRow);
+              }}
+              className="border-amber-500/40 text-amber-800 hover:bg-amber-500/15 dark:text-amber-200 touch:min-h-8"
+            >
+              <CheckCircle2 aria-hidden="true" /> Mark resolved
+            </Button>
+          </div>
+        )}
       </div>
       <div className="absolute top-1 right-2 hidden items-center gap-0.5 rounded-lg border bg-background/95 p-0.5 shadow-xs [@media(hover:hover)]:group-hover:flex group-focus-within:flex">
         {deletedView ? (
           <QuickAction label="Restore" onClick={() => mark("restore", ids)} icon={RotateCcw} />
         ) : (
           <>
+            {needs && (
+              <QuickAction
+                label="Mark resolved"
+                ariaLabel={`Mark resolved: ${title}`}
+                onClick={() => promptResolve(openInRow)}
+                icon={CheckCircle2}
+              />
+            )}
             <QuickAction label="Delete" onClick={() => mark("delete", ids)} icon={Trash2} />
             <QuickAction
               label={unread ? "Mark as read" : "Mark as unread"}

@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Archive, ArchiveRestore, ArrowLeft, ChevronDown, ChevronUp, ChevronsUpDown, Flag, Forward, Mail, MailOpen, MoreHorizontal, Pin, Reply, ReplyAll, RotateCcw, Trash2 } from "lucide-react";
+import { AlertTriangle, Archive, ArchiveRestore, ArrowLeft, CheckCircle2, ChevronDown, ChevronUp, ChevronsUpDown, Flag, Forward, Mail, MailOpen, MoreHorizontal, Pin, Reply, ReplyAll, RotateCcw, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { eventTaskId, matchSnippet, messageHits, visibleEvents } from "@/lib/threads";
-import { fullTime, GOAL_STATE_STYLE, listTime, plainTaskTitle, TYPE_STYLE } from "@/lib/format";
+import { fullTime, GOAL_STATE_STYLE, listTime, plainTaskTitle, RESOLUTION_CHANNEL_LABEL, TYPE_STYLE } from "@/lib/format";
 import type { BusEvent } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -56,14 +56,17 @@ function Recipients({ e }: { e: BusEvent }) {
 }
 
 function MessageCard({ e, expanded, onToggle, focused, query }: { e: BusEvent; expanded: boolean; onToggle: () => void; focused: boolean; query: string }) {
-  const { agents, ms, mark, startCompose, openHumanIds, taskTags } = useMailroom();
+  const { agents, ms, mark, startCompose, openHumanIds, clickResolutions, promptResolve, taskTags } = useMailroom();
   const taskTag = eventTaskId(e, taskTags);
   const deleted = ms.isDeleted(e);
   const flagged = ms.isFlagged(e);
   const unread = ms.isUnread(e);
-  const type = TYPE_STYLE[e.type] ?? TYPE_STYLE.message;
-  const sender = e.from === "user" ? "You" : agents.get(e.from)?.name ?? e.from;
   const needs = openHumanIds.has(e.id);
+  const resolution = clickResolutions.get(e.id) ?? null;
+  const type = e.type === "human.needed" && !needs && resolution
+    ? TYPE_STYLE["human.resolved"]
+    : (TYPE_STYLE[e.type] ?? TYPE_STYLE.message);
+  const sender = e.from === "user" ? "You" : agents.get(e.from)?.name ?? e.from;
   const needle = query.trim().toLowerCase();
   const hit = !!needle && (e.id.toLowerCase() === needle || e.body.toLowerCase().includes(needle));
 
@@ -99,9 +102,34 @@ function MessageCard({ e, expanded, onToggle, focused, query }: { e: BusEvent; e
       {expanded && (
         <>
           <div className="px-3 pb-3 sm:px-4 sm:pl-[60px]">
-            {needs && (
-              <div className="mb-3 flex items-center gap-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/50 dark:text-amber-200">
-                <AlertTriangle className="size-4 shrink-0" /> {e.from} is waiting for your decision.
+            {needs && !deleted && (
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/50 dark:text-amber-200">
+                <span className="flex min-w-0 items-center gap-2">
+                  <AlertTriangle className="size-4 shrink-0" aria-hidden="true" />
+                  <span>{e.from} is waiting for your decision.</span>
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  data-mark-resolved={e.id}
+                  onClick={() => promptResolve([e])}
+                  className="border-amber-500/45 bg-background/85 text-amber-900 hover:bg-amber-500/15 dark:text-amber-100 touch:min-h-8"
+                >
+                  <CheckCircle2 aria-hidden="true" /> Mark resolved
+                </Button>
+              </div>
+            )}
+            {!needs && resolution && (
+              <div
+                data-click-resolution={e.id}
+                className="mb-3 flex flex-wrap items-center gap-1.5 rounded-md border border-emerald-500/25 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-800 dark:text-emerald-200"
+              >
+                <CheckCircle2 className="size-3.5 shrink-0" aria-hidden="true" />
+                <span className="font-medium">
+                  Marked resolved{resolution.resolved_via ? ` · ${RESOLUTION_CHANNEL_LABEL[resolution.resolved_via]}` : ""}
+                </span>
+                <span className="text-emerald-700/80 dark:text-emerald-300/80">· {fullTime(resolution.ts)}</span>
               </div>
             )}
             <RichText text={e.body} query={hit ? query : ""} />
@@ -123,6 +151,18 @@ function MessageCard({ e, expanded, onToggle, focused, query }: { e: BusEvent; e
             <Button variant="ghost" size="sm" aria-label="Forward" onClick={() => startCompose("forward", e)}>
               <Forward /> <span className="hidden sm:inline">Forward</span>
             </Button>
+            {needs && !deleted && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-label="Mark resolved"
+                onClick={() => promptResolve([e])}
+                className="text-amber-700 hover:text-amber-900 dark:text-amber-300 dark:hover:text-amber-100"
+              >
+                <CheckCircle2 aria-hidden="true" /> <span className="hidden sm:inline">Mark resolved</span>
+              </Button>
+            )}
             <Tip label={`${e.ts}${taskTag ? ` · ${taskTag}` : ""}`} side="top" className="ml-auto min-w-0 truncate">
               <span className="font-mono text-[11px] text-muted-foreground">
                 {e.id}
@@ -144,7 +184,7 @@ function MessageCard({ e, expanded, onToggle, focused, query }: { e: BusEvent; e
 }
 
 function EmptyReading() {
-  const { openHuman, agents, openEvent, threads, ms } = useMailroom();
+  const { openHuman, agents, openEvent, promptResolve, threads, ms } = useMailroom();
   const unread = threads.reduce((n, t) => n + t.events.filter(ms.isUnread).length, 0);
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center">
@@ -162,13 +202,25 @@ function EmptyReading() {
         <div className="w-full max-w-md space-y-2 text-left">
           <p className="text-xs font-semibold tracking-wide text-amber-600 uppercase">Waiting for you</p>
           {openHuman.slice(-5).map((e) => (
-            <button key={e.id} type="button" onClick={() => openEvent(e.id)} className="flex w-full items-start gap-2 rounded-md border p-2 text-left hover:bg-muted">
-              <AgentAvatar id={e.from} size="sm" />
-              <span className="min-w-0 text-sm">
-                <span className="font-medium">{agents.get(e.from)?.name ?? e.from}</span>
-                <span className="line-clamp-2 text-xs text-muted-foreground">{e.body}</span>
-              </span>
-            </button>
+            <div key={e.id} className="flex items-start gap-2 rounded-md border p-2">
+              <button type="button" onClick={() => openEvent(e.id)} className="flex min-w-0 flex-1 items-start gap-2 rounded text-left hover:opacity-90">
+                <AgentAvatar id={e.from} size="sm" />
+                <span className="min-w-0 text-sm">
+                  <span className="font-medium">{agents.get(e.from)?.name ?? e.from}</span>
+                  <span className="line-clamp-2 block text-xs text-muted-foreground">{e.body}</span>
+                </span>
+              </button>
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                aria-label={`Mark resolved: ${e.id}`}
+                onClick={() => promptResolve([e])}
+                className="shrink-0 touch:min-h-8"
+              >
+                <CheckCircle2 aria-hidden="true" /> Mark resolved
+              </Button>
+            </div>
           ))}
         </div>
       )}
@@ -177,7 +229,7 @@ function EmptyReading() {
 }
 
 export function ReadingPane() {
-  const { threads, selected, select, folder, ms, mark, compose, startCompose, focusEvent, agents, snap, openGoalTask, search } = useMailroom();
+  const { threads, selected, select, folder, ms, mark, compose, startCompose, focusEvent, agents, snap, openGoalTask, search, openHumanIds, promptResolve } = useMailroom();
   const thread = useMemo(() => threads.find((t) => t.key === selected) ?? null, [threads, selected]);
   const evs = useMemo(() => (thread ? visibleEvents(thread, folder, ms) : []), [thread, folder, ms]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -189,6 +241,7 @@ export function ReadingPane() {
     const v = visibleEvents(thread, folder, ms);
     const open = new Set(v.slice(-2).map((e) => e.id));
     v.filter(ms.isUnread).forEach((e) => open.add(e.id));
+    v.filter((e) => openHumanIds.has(e.id)).forEach((e) => open.add(e.id));
     if (focusEvent) open.add(focusEvent);
     const q = search.trim();
     if (q) messageHits(v, q).forEach((e) => open.add(e.id));
@@ -245,6 +298,7 @@ export function ReadingPane() {
   const ids = evs.map((e) => e.id);
   const flagged = evs.some(ms.isFlagged);
   const deletedView = folder === "deleted";
+  const openInThread = deletedView ? [] : evs.filter((e) => openHumanIds.has(e.id));
   const pinned = !deletedView && ms.isPinned(thread.key);
   const archived = evs.every(ms.isArchived);
   const goalTask = thread.goalTask;
@@ -340,6 +394,17 @@ export function ReadingPane() {
                 </Button>
               ) : thread.taskId && <Pill className="bg-muted font-mono text-muted-foreground">{thread.taskId} · Unlinked</Pill>}
               {taskStyle && <Pill className={taskStyle.cls}>{goalTask?.decision ? "USER decision" : taskStyle.label}</Pill>}
+              {openInThread.length > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  onClick={() => promptResolve(openInThread)}
+                  className="border-amber-500/45 text-amber-800 hover:bg-amber-500/15 dark:text-amber-200 touch:min-h-8"
+                >
+                  <CheckCircle2 aria-hidden="true" /> Mark resolved
+                </Button>
+              )}
               <span className="text-xs text-muted-foreground">
                 {evs.length} message{evs.length === 1 ? "" : "s"} ·
               </span>

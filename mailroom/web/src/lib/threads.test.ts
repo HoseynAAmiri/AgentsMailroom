@@ -5,6 +5,7 @@ import type * as ThreadsModule from "./threads";
 
 const {
   buildThreads,
+  clickResolutions,
   mailState,
   openHumanRequests,
   openHumanThreads,
@@ -165,4 +166,117 @@ test("pinned threads sort ahead of newer unpinned threads except in Deleted item
     sortFolderThreads(threads, "all", msUnpinned).map((t) => t.key),
     ["task:G1.3", "task:G1.2", "task:G1.1"],
   );
+});
+
+test("click-resolution closes targeted human.needed without adding a fake message or polluting Sent items", () => {
+  const events: BusEvent[] = [
+    ev({
+      id: "e8715",
+      ts: "2026-11-28T12:29:32Z",
+      type: "human.needed",
+      from: "muse",
+      to: "user",
+      task_id: "G2.11",
+      subject: "G2.11: pick the upstream implementation order",
+      body: "Your pick: A) endorsed order, B) Facci first, C) hold.",
+    }),
+    ev({
+      id: "e8729",
+      ts: "2026-11-28T15:05:00Z",
+      type: "human.resolved",
+      from: "user",
+      to: "muse",
+      task_id: "G2.11",
+      in_reply_to: "e8715",
+      body: "",
+      resolved_by_click: true,
+      resolved_via: "muse_chat",
+    }),
+  ];
+
+  const open = openHumanRequests(events);
+  assert.equal(open.length, 0);
+
+  const resolutions = clickResolutions(events);
+  assert.deepEqual(resolutions.get("e8715"), {
+    eventId: "e8729",
+    targetId: "e8715",
+    ts: "2026-11-28T15:05:00Z",
+    resolved_by_click: true,
+    resolved_via: "muse_chat",
+  });
+
+  const ms = mailState(undefined);
+  const threads = buildThreads(events, []);
+  const ctx = makeCtx(events, new Set(open.map((e) => e.id)), ms);
+
+  assert.equal(openHumanThreads(threads, ctx).length, 0);
+  assert.equal(threads.length, 1);
+  // Thread still contains only the real message (no blank fake reply card) and stays out of Sent items.
+  assert.deepEqual(threads[0].events.map((e) => e.id), ["e8715"]);
+  assert.equal(threadInFolder(threads[0], "sent", ctx), false);
+  assert.equal(threadInFolder(threads[0], "inbox", ctx), true);
+});
+
+test("click-resolving one of two open human.needed items in a thread leaves the second open until resolved", () => {
+  const baseEvents: BusEvent[] = [
+    ev({ id: "e4502", type: "human.needed", task_id: "G5.8", subject: "Push G5.8?" }),
+    ev({ id: "e4519", type: "human.needed", task_id: "G5.8", subject: "Clear flag?" }),
+    ev({
+      id: "e4520",
+      ts: "2026-11-21T15:40:00Z",
+      type: "human.resolved",
+      from: "user",
+      to: "muse",
+      task_id: "G5.8",
+      in_reply_to: "e4502",
+      body: "",
+      resolved_by_click: true,
+      resolved_via: null,
+    }),
+  ];
+
+  const openAfterFirst = openHumanRequests(baseEvents);
+  assert.deepEqual(openAfterFirst.map((e) => e.id), ["e4519"]);
+  const ms = mailState(undefined);
+  const threadsAfterFirst = buildThreads(baseEvents, []);
+  const ctxAfterFirst = makeCtx(baseEvents, new Set(openAfterFirst.map((e) => e.id)), ms);
+  assert.equal(openHumanThreads(threadsAfterFirst, ctxAfterFirst).length, 1);
+
+  const allResolved: BusEvent[] = [
+    ...baseEvents,
+    ev({
+      id: "e4521",
+      ts: "2026-11-21T15:41:00Z",
+      type: "human.resolved",
+      from: "user",
+      to: "muse",
+      task_id: "G5.8",
+      in_reply_to: "e4519",
+      body: "",
+      resolved_by_click: true,
+      resolved_via: "terminal",
+    }),
+  ];
+  const openAfterBoth = openHumanRequests(allResolved);
+  assert.equal(openAfterBoth.length, 0);
+  const ctxAfterBoth = makeCtx(allResolved, new Set(), ms);
+  assert.equal(openHumanThreads(buildThreads(allResolved, []), ctxAfterBoth).length, 0);
+});
+
+test("normal written USER reply still closes human.needed and appears in conversation and Sent items", () => {
+  const events: BusEvent[] = [
+    ev({ id: "e300", type: "human.needed", from: "muse", to: "user", task_id: "G2.11", body: "Pick order" }),
+    ev({ id: "e301", type: "message", from: "user", to: "muse", task_id: "G2.11", in_reply_to: "e300", body: "Option A." }),
+  ];
+  const open = openHumanRequests(events);
+  assert.equal(open.length, 0);
+  assert.equal(clickResolutions(events).size, 0);
+
+  const ms = mailState(undefined);
+  const threads = buildThreads(events, []);
+  const ctx = makeCtx(events, new Set(), ms);
+  assert.equal(openHumanThreads(threads, ctx).length, 0);
+  assert.deepEqual(threads[0].events.map((e) => e.id), ["e300", "e301"]);
+  assert.equal(threadInFolder(threads[0], "sent", ctx), true);
 });

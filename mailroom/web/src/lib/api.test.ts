@@ -5,6 +5,7 @@ import type * as ApiModule from "./api";
 const {
   attachmentDownloadHref,
   attachmentHref,
+  buildResolveHumanPayload,
   fileCategory,
   fileExtension,
   fileHref,
@@ -55,4 +56,30 @@ test("attachmentHref, fileHref, and attachmentDownloadHref handle attachments cl
   assert.equal(attachmentDownloadHref("/repo/docs/ok.md"), "/repo/docs/ok.md");
   assert.equal(fileHref("README"), null);
   assert.equal(fileHref("coordination/attachments/README"), "/attach/README");
+});
+
+test("buildResolveHumanPayload sends human.resolved without text and includes optional preset only when chosen", () => {
+  assert.deepEqual(buildResolveHumanPayload("e8715", null), {
+    type: "human.resolved",
+    from: "user",
+    in_reply_to: "e8715",
+  });
+  assert.deepEqual(buildResolveHumanPayload("e8715", "muse_chat"), {
+    type: "human.resolved",
+    from: "user",
+    in_reply_to: "e8715",
+    resolved_via: "muse_chat",
+  });
+  assert.deepEqual(buildResolveHumanPayload("e8715", "terminal"), {
+    type: "human.resolved",
+    from: "user",
+    in_reply_to: "e8715",
+    resolved_via: "terminal",
+  });
+  assert.deepEqual(buildResolveHumanPayload("e8715", "other"), {
+    type: "human.resolved",
+    from: "user",
+    in_reply_to: "e8715",
+    resolved_via: "other",
+  });
 });
