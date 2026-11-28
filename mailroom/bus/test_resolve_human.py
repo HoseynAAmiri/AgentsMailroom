@@ -146,13 +146,16 @@ class ResolveHumanByClickTest(unittest.TestCase):
                         "type": "human.resolved", "from": "user", "in_reply_to": hn1["id"],
                         "resolved_via": "Answered option A in hallway",
                     }, 400)
+                    expect_error(public, "/api/events", {
+                        "type": "human.resolved", "from": "user", "in_reply_to": hn1["id"],
+                        "resolved_via": "muse_chat",
+                    }, 400)
 
-                    # Confirm click-resolution with "Muse chat" preset on public port (no text required).
+                    # Confirm plain by-click resolution on public port (no text or channel required).
                     code1, res1 = api_call(public, "/api/events", post={
                         "type": "human.resolved",
                         "from": "user",
                         "in_reply_to": hn1["id"],
-                        "resolved_via": "Muse chat",
                     })
                     self.assertEqual(code1, 201)
                     assert isinstance(res1, dict)
@@ -163,7 +166,7 @@ class ResolveHumanByClickTest(unittest.TestCase):
                     self.assertEqual(res1["task_id"], "G2.11")
                     self.assertEqual(res1["body"], "")
                     self.assertIs(res1["resolved_by_click"], True)
-                    self.assertEqual(res1["resolved_via"], "muse_chat")
+                    self.assertNotIn("resolved_via", res1)
                     self.assertTrue(res1["ts"].endswith("Z"))
 
                     # Idempotent repeat click returns 200 with the same event and does not append a duplicate.
@@ -171,7 +174,6 @@ class ResolveHumanByClickTest(unittest.TestCase):
                         "type": "human.resolved",
                         "from": "user",
                         "in_reply_to": hn1["id"],
-                        "resolved_via": "terminal",
                     })
                     self.assertEqual(code_dup, 200)
                     self.assertEqual(res_dup, res1)
@@ -209,13 +211,13 @@ class ResolveHumanByClickTest(unittest.TestCase):
                     _, detail_g211 = api_call(admin, "/api/todo?id=G2.11")
                     self.assertNotIn(res1["id"], [e["id"] for e in detail_g211["events"]])
 
-                    # Multi-item task + unset preset + "terminal" + "other" + expired temporary agent sender.
+                    # Multi-item task + expired temporary agent sender.
                     hn2 = client("post", "--from", "coordinator", "--to", "user", "--type", "human.needed",
                                  "--task-id", "G1.1", "--body", "Question 1")
                     hn3 = client("post", "--from", "coordinator", "--to", "user", "--type", "human.needed",
                                  "--task-id", "G1.1", "--body", "Question 2")
 
-                    # Resolve hn2 with NO preset selected (unset -> resolved_via is None).
+                    # Resolve hn2 by click -> G1.1 still has hn3 open, so derived state remains waiting_human.
                     code2, res2 = api_call(admin, "/api/events", post={
                         "type": "human.resolved",
                         "from": "user",
@@ -223,24 +225,22 @@ class ResolveHumanByClickTest(unittest.TestCase):
                     })
                     self.assertEqual(code2, 201)
                     self.assertIs(res2["resolved_by_click"], True)
-                    self.assertIsNone(res2["resolved_via"])
-                    # G1.1 still has hn3 open, so derived state remains waiting_human.
+                    self.assertNotIn("resolved_via", res2)
                     _, tasks_mid = api_call(public, "/api/tasks")
                     self.assertEqual(next(t for t in tasks_mid if t["task_id"] == "G1.1")["state"], "waiting_human")
 
-                    # Resolve hn3 with "terminal" preset -> G1.1 leaves waiting_human.
+                    # Resolve hn3 by click -> G1.1 leaves waiting_human.
                     code3, res3 = api_call(public, "/api/events", post={
                         "type": "human.resolved",
                         "from": "user",
                         "in_reply_to": hn3["id"],
-                        "resolved_via": "terminal",
                     })
                     self.assertEqual(code3, 201)
-                    self.assertEqual(res3["resolved_via"], "terminal")
+                    self.assertNotIn("resolved_via", res3)
                     _, tasks_cleared = api_call(public, "/api/tasks")
                     self.assertEqual(next(t for t in tasks_cleared if t["task_id"] == "G1.1")["state"], "open")
 
-                    # Ended temporary agent's human.needed item can still be marked resolved with "other".
+                    # Ended temporary agent's human.needed item can still be marked resolved by click.
                     agents_path = store / "bus" / "agents.json"
                     agents_data = json.loads(agents_path.read_text(encoding="utf-8"))
                     agents_data["agents"].append({
@@ -262,11 +262,10 @@ class ResolveHumanByClickTest(unittest.TestCase):
                         "type": "human.resolved",
                         "from": "user",
                         "in_reply_to": hn_temp["id"],
-                        "resolved_via": "other",
                     })
                     self.assertEqual(code_temp, 201)
                     self.assertEqual(res_temp["to"], "t1")
-                    self.assertEqual(res_temp["resolved_via"], "other")
+                    self.assertNotIn("resolved_via", res_temp)
                     _, untagged = api_call(admin, "/api/todo?id=untagged")
                     self.assertNotIn(res_temp["id"], [e["id"] for e in untagged["events"]])
 

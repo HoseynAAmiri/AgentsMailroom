@@ -1,16 +1,28 @@
-import type { BusEvent, ResolutionChannel } from "./types";
+import type { BusEvent } from "./types";
 
 export interface ResolveDialogState {
   targets: BusEvent[] | null;
-  via: ResolutionChannel | null;
   submitting: boolean;
 }
 
 export const INITIAL_RESOLVE_DIALOG_STATE: ResolveDialogState = {
   targets: null,
-  via: null,
   submitting: false,
 };
+
+/** Extract the first non-empty line of text, collapsed to single spaces and truncated to `max` chars. */
+export function firstLineSnippet(text: string | null | undefined, max = 140): string {
+  const lines = String(text ?? "").split(/\r?\n/);
+  const first = (lines.find((line) => line.trim().length > 0) ?? "").replace(/\s+/g, " ").trim();
+  return first.length > max ? first.slice(0, max - 1) + "…" : first;
+}
+
+/** Short single-line preview for needs-you items: subject if present, otherwise first line of body. */
+export function needsPreview(event: Pick<BusEvent, "subject" | "body">, max = 120): string {
+  const subj = String(event.subject ?? "").replace(/\s+/g, " ").trim();
+  if (subj) return subj.length > max ? subj.slice(0, max - 1) + "…" : subj;
+  return firstLineSnippet(event.body, max);
+}
 
 /** Deduplicate and keep only open `human.needed` items for confirmation. */
 export function selectResolvableTargets(candidates: readonly BusEvent[], openHumanIds: ReadonlySet<string>): BusEvent[] {
@@ -24,14 +36,6 @@ export function selectResolvableTargets(candidates: readonly BusEvent[], openHum
   return out;
 }
 
-/** Toggle an optional resolution channel preset; clicking the active preset clears it back to null. */
-export function toggleResolutionPreset(
-  current: ResolutionChannel | null,
-  chosen: ResolutionChannel,
-): ResolutionChannel | null {
-  return current === chosen ? null : chosen;
-}
-
 /** Merge newly created events into an existing chronological list without duplicates. */
 export function mergeUniqueEvents(existing: readonly BusEvent[], incoming: readonly BusEvent[]): BusEvent[] {
   if (!incoming.length) return [...existing];
@@ -43,12 +47,11 @@ export function mergeUniqueEvents(existing: readonly BusEvent[], incoming: reado
 /** Run the confirmation dialog submit step across all selected open `human.needed` items. */
 export async function executeClickResolution(
   targets: readonly BusEvent[],
-  via: ResolutionChannel | null,
-  resolveOne: (eventId: string, via: ResolutionChannel | null) => Promise<BusEvent>,
+  resolveOne: (eventId: string) => Promise<BusEvent>,
 ): Promise<BusEvent[]> {
   const created: BusEvent[] = [];
   for (const target of targets) {
-    created.push(await resolveOne(target.id, via));
+    created.push(await resolveOne(target.id));
   }
   return created;
 }

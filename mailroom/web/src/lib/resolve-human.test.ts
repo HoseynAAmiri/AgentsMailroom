@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
-import type { BusEvent, ResolutionChannel } from "./types";
+import type { BusEvent } from "./types";
 import type * as ResolveModule from "./resolve-human";
 import type * as ThreadsModule from "./threads";
 
 const {
   INITIAL_RESOLVE_DIALOG_STATE,
   executeClickResolution,
+  firstLineSnippet,
   mergeUniqueEvents,
+  needsPreview,
   selectResolvableTargets,
-  toggleResolutionPreset,
 } = (await import(new URL("./resolve-human.ts", import.meta.url).href)) as typeof ResolveModule;
 
 const {
@@ -28,7 +30,7 @@ function makeEvent(partial: Partial<BusEvent> & { id: string }): BusEvent {
   };
 }
 
-test("clicking Mark resolved -> confirmation dialog -> cancel leaves events untouched -> confirm resolves immediately", async () => {
+test("clicking Mark resolved -> confirmation-only dialog -> cancel leaves events untouched -> confirm resolves without channel", async () => {
   let events: BusEvent[] = [
     makeEvent({ id: "e8715", type: "human.needed", task_id: "G2.11", subject: "Pick G2.11 order" }),
     makeEvent({ id: "e8720", type: "message", from: "muse", to: "a3", task_id: "G2.11", body: "Followup" }),
@@ -46,7 +48,7 @@ test("clicking Mark resolved -> confirmation dialog -> cancel leaves events unto
   };
   assert.equal(dialogOpen.targets?.length, 1);
   assert.equal(dialogOpen.targets?.[0].id, "e8715");
-  assert.equal(dialogOpen.via, null);
+  assert.equal("via" in dialogOpen, false);
 
   // Step 3: Cancel closes confirmation dialog without calling API or mutating openHumanRequests.
   let apiCalls = 0;
@@ -55,20 +57,8 @@ test("clicking Mark resolved -> confirmation dialog -> cancel leaves events unto
   assert.equal(apiCalls, 0);
   assert.equal(openHumanRequests(events).length, 1);
 
-  // Step 4: Reopen, toggle preset (Muse chat -> Terminal -> toggle off -> Other -> Muse chat), then confirm.
-  let via: ResolutionChannel | null = null;
-  via = toggleResolutionPreset(via, "muse_chat");
-  assert.equal(via, "muse_chat");
-  via = toggleResolutionPreset(via, "muse_chat");
-  assert.equal(via, null);
-  via = toggleResolutionPreset(via, "terminal");
-  assert.equal(via, "terminal");
-  via = toggleResolutionPreset(via, "other");
-  assert.equal(via, "other");
-  via = toggleResolutionPreset(via, "muse_chat");
-  assert.equal(via, "muse_chat");
-
-  const created = await executeClickResolution(dialogOpen.targets!, via, async (eventId, chosenVia) => {
+  // Step 4: Confirm sends plain by-click resolution with no channel field.
+  const created = await executeClickResolution(dialogOpen.targets!, async (eventId) => {
     apiCalls += 1;
     return {
       id: "e8729",
@@ -81,13 +71,11 @@ test("clicking Mark resolved -> confirmation dialog -> cancel leaves events unto
       body: "",
       refs: [],
       resolved_by_click: true,
-      resolved_via: chosenVia,
     };
   });
 
   assert.equal(apiCalls, 1);
   events = mergeUniqueEvents(events, created);
-  // Immediate optimistic merge followed by poll refresh containing the same event does not duplicate.
   events = mergeUniqueEvents(events, created);
   assert.equal(events.length, 3);
   assert.equal(openHumanRequests(events).length, 0);
@@ -96,6 +84,34 @@ test("clicking Mark resolved -> confirmation dialog -> cancel leaves events unto
     targetId: "e8715",
     ts: "2026-11-28T15:10:00Z",
     resolved_by_click: true,
-    resolved_via: "muse_chat",
   });
+});
+
+test("needsPreview and firstLineSnippet return compact truncated subject or first line, never full multi-line body", () => {
+  const multiLineBody = "\n  First summary line for USER decision.\n\nSecond paragraph with 500 words of detail that must stay hidden until opened.\nThird line.";
+  assert.equal(firstLineSnippet(multiLineBody, 120), "First summary line for USER decision.");
+  assert.equal(
+    needsPreview({ subject: "Approve G6.1 cutover?", body: multiLineBody }, 120),
+    "Approve G6.1 cutover?",
+  );
+  assert.equal(
+    needsPreview({ subject: "   ", body: multiLineBody }, 120),
+    "First summary line for USER decision.",
+  );
+  assert.equal(
+    needsPreview({ subject: null, body: "A".repeat(40) }, 15),
+    `${"A".repeat(14)}…`,
+  );
+});
+
+test("resolve-dialog and reading-pane keep confirmation-only dialog and truncated needs-you previews", () => {
+  const dialogSrc = fs.readFileSync(new URL("../components/mailroom/resolve-dialog.tsx", import.meta.url), "utf8");
+  const readingSrc = fs.readFileSync(new URL("../components/mailroom/reading-pane.tsx", import.meta.url), "utf8");
+  assert.equal(dialogSrc.includes("Where did you answer"), false);
+  assert.equal(dialogSrc.includes("RESOLUTION_PRESETS"), false);
+  assert.equal(dialogSrc.includes("Are you sure you answered"), true);
+  // Regression guard: never combine `line-clamp-*` with `block` (`display: block` overrides `-webkit-box`)
+  // and never auto-expand all openHumanIds inline when opening a thread.
+  assert.equal(/line-clamp-\d+\s+block|block\s+line-clamp-\d+/.test(readingSrc), false);
+  assert.equal(readingSrc.includes("v.filter((e) => openHumanIds.has(e.id)).forEach((e) => open.add(e.id))"), false);
 });

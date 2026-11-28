@@ -65,7 +65,6 @@ export function clickResolutions(events: readonly BusEvent[]): Map<string, Click
         targetId: e.in_reply_to,
         ts: e.ts,
         resolved_by_click: true,
-        resolved_via: e.resolved_via ?? null,
       });
     }
   }

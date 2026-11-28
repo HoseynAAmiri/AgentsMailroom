@@ -1,4 +1,4 @@
-import type { Agent, Attachment, BusEvent, Link, MailTaskIndex, Ref, ResolutionChannel, UserState } from "./types";
+import type { Agent, Attachment, BusEvent, Link, MailTaskIndex, Ref, UserState } from "./types";
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { cache: "no-store", ...init });
@@ -22,12 +22,11 @@ export interface OutgoingMessage {
   refs?: Ref[];
 }
 
-export function buildResolveHumanPayload(in_reply_to: string, resolved_via: ResolutionChannel | null = null) {
+export function buildResolveHumanPayload(in_reply_to: string) {
   return {
     type: "human.resolved" as const,
     from: "user" as const,
     in_reply_to,
-    ...(resolved_via ? { resolved_via } : {}),
   };
 }
 
@@ -37,8 +36,8 @@ export const api = {
   goalTag: (eventId: string) => call<{ override: boolean; task_id: string | null }>(`/api/todo?event_id=${encodeURIComponent(eventId)}`),
   linkGoalFile: (id: string, path: string) => post<{ export_warning?: string }>("/api/todo", { action: "link", id, path }),
   send: (m: OutgoingMessage) => post<BusEvent>("/api/events", { type: "message", from: "user", ...m }),
-  resolveHuman: (in_reply_to: string, resolved_via: ResolutionChannel | null = null) =>
-    post<BusEvent>("/api/events", buildResolveHumanPayload(in_reply_to, resolved_via)),
+  resolveHuman: (in_reply_to: string) =>
+    post<BusEvent>("/api/events", buildResolveHumanPayload(in_reply_to)),
   uploadAttachment: async (file: Blob, name: string, taskId?: string) => {
     const url = taskId ? `/api/attachments?task_id=${encodeURIComponent(taskId)}` : "/api/attachments";
     const asciiName = name.replace(/[^\x20-\x7e]/g, "_") || "attachment";

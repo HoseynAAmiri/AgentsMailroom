@@ -445,10 +445,9 @@ class SnapshotIsolationTest(unittest.TestCase):
         events = [
             {"id": "e00001", "ts": "2026-11-19T00:00:00Z", "type": "message", "from": "coordinator", "to": "worker", "body": "internal note"},
             {"id": "e00002", "ts": "2026-11-19T00:01:00Z", "type": "human.needed", "from": "coordinator", "to": "user", "task_id": "G1.1", "body": "sensitive user prompt"},
-            {"id": "e00003", "ts": "2026-11-19T00:05:00Z", "type": "human.resolved", "from": "user", "to": "coordinator", "task_id": "G1.1", "in_reply_to": "e00002", "body": "", "resolved_by_click": True, "resolved_via": "muse_chat"},
+            {"id": "e00003", "ts": "2026-11-19T00:05:00Z", "type": "human.resolved", "from": "user", "to": "coordinator", "task_id": "G1.1", "in_reply_to": "e00002", "body": "", "resolved_by_click": True},
             {"id": "e00004", "ts": "2026-11-19T00:06:00Z", "type": "human.needed", "from": "coordinator", "to": "user", "body": "second user prompt"},
-            {"id": "e00005", "ts": "2026-11-19T00:07:00Z", "type": "human.resolved", "from": "user", "to": "coordinator", "in_reply_to": "e00004", "body": "", "resolved_by_click": True, "resolved_via": None},
-            {"id": "e00006", "ts": "2026-11-19T00:08:00Z", "type": "human.resolved", "from": "user", "to": "coordinator", "in_reply_to": "e00004", "body": "", "resolved_by_click": True, "resolved_via": "unapproved free text"},
+            {"id": "e00005", "ts": "2026-11-19T00:07:00Z", "type": "human.resolved", "from": "user", "to": "coordinator", "in_reply_to": "e00004", "body": "", "resolved_by_click": True, "resolved_via": "legacy_or_free_text"},
         ]
         (self.store / "bus" / "events.jsonl").write_text(
             "\n".join(json.dumps(row) for row in events) + "\n", encoding="utf-8"
@@ -456,7 +455,7 @@ class SnapshotIsolationTest(unittest.TestCase):
 
         self.run_snap("--git-dir", str(self.git_dir), "--init")
         r_snap = self.run_snap("--git-dir", str(self.git_dir))
-        self.assertIn("exported 6 event projections", r_snap.stdout)
+        self.assertIn("exported 5 event projections", r_snap.stdout)
 
         proj_lines = [
             json.loads(line)
@@ -472,7 +471,6 @@ class SnapshotIsolationTest(unittest.TestCase):
                 "id": "e00003",
                 "in_reply_to": "e00002",
                 "resolved_by_click": True,
-                "resolved_via": "muse_chat",
                 "task_id": "G1.1",
                 "ts": "2026-11-19T00:05:00Z",
                 "type": "human.resolved",
@@ -490,11 +488,10 @@ class SnapshotIsolationTest(unittest.TestCase):
                 "user_involved": True,
             },
         )
-        # Non-enum resolved_via is stripped fail-closed from exported projection.
-        self.assertNotIn("resolved_via", proj_lines[5])
         for row in proj_lines:
             self.assertNotIn("body", row)
             self.assertNotIn("subject", row)
+            self.assertNotIn("resolved_via", row)
 
 
 if __name__ == "__main__":

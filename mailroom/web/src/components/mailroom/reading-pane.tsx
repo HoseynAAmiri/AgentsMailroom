@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Archive, ArchiveRestore, ArrowLeft, CheckCircle2, ChevronDown, ChevronUp, ChevronsUpDown, Flag, Forward, Mail, MailOpen, MoreHorizontal, Pin, Reply, ReplyAll, RotateCcw, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { eventTaskId, matchSnippet, messageHits, visibleEvents } from "@/lib/threads";
-import { fullTime, GOAL_STATE_STYLE, listTime, plainTaskTitle, RESOLUTION_CHANNEL_LABEL, TYPE_STYLE } from "@/lib/format";
+import { needsPreview } from "@/lib/resolve-human";
+import { fullTime, GOAL_STATE_STYLE, listTime, plainTaskTitle, TYPE_STYLE } from "@/lib/format";
 import type { BusEvent } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -94,7 +95,7 @@ function MessageCard({ e, expanded, onToggle, focused, query }: { e: BusEvent; e
           </div>
           {expanded ? <Recipients e={e} /> : (
             <p className="truncate text-xs text-muted-foreground">
-              <Highlight text={hit ? matchSnippet(e.body, query, 240) : e.body.replace(/\s+/g, " ")} query={hit ? query : ""} />
+              <Highlight text={hit ? matchSnippet(e.body, query, 240) : needsPreview(e, 160)} query={hit ? query : ""} />
             </p>
           )}
         </div>
@@ -126,9 +127,7 @@ function MessageCard({ e, expanded, onToggle, focused, query }: { e: BusEvent; e
                 className="mb-3 flex flex-wrap items-center gap-1.5 rounded-md border border-emerald-500/25 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-800 dark:text-emerald-200"
               >
                 <CheckCircle2 className="size-3.5 shrink-0" aria-hidden="true" />
-                <span className="font-medium">
-                  Marked resolved{resolution.resolved_via ? ` · ${RESOLUTION_CHANNEL_LABEL[resolution.resolved_via]}` : ""}
-                </span>
+                <span className="font-medium">Marked resolved</span>
                 <span className="text-emerald-700/80 dark:text-emerald-300/80">· {fullTime(resolution.ts)}</span>
               </div>
             )}
@@ -202,12 +201,12 @@ function EmptyReading() {
         <div className="w-full max-w-md space-y-2 text-left">
           <p className="text-xs font-semibold tracking-wide text-amber-600 uppercase">Waiting for you</p>
           {openHuman.slice(-5).map((e) => (
-            <div key={e.id} className="flex items-start gap-2 rounded-md border p-2">
-              <button type="button" onClick={() => openEvent(e.id)} className="flex min-w-0 flex-1 items-start gap-2 rounded text-left hover:opacity-90">
+            <div key={e.id} className="flex items-center gap-2 rounded-md border p-2">
+              <button type="button" onClick={() => openEvent(e.id)} className="flex min-w-0 flex-1 items-center gap-2 rounded text-left hover:opacity-90">
                 <AgentAvatar id={e.from} size="sm" />
-                <span className="min-w-0 text-sm">
-                  <span className="font-medium">{agents.get(e.from)?.name ?? e.from}</span>
-                  <span className="line-clamp-2 block text-xs text-muted-foreground">{e.body}</span>
+                <span className="min-w-0 flex-1 text-sm">
+                  <span className="block truncate font-medium">{agents.get(e.from)?.name ?? e.from}</span>
+                  <span className="block truncate text-xs text-muted-foreground">{needsPreview(e, 120)}</span>
                 </span>
               </button>
               <Button
@@ -241,7 +240,6 @@ export function ReadingPane() {
     const v = visibleEvents(thread, folder, ms);
     const open = new Set(v.slice(-2).map((e) => e.id));
     v.filter(ms.isUnread).forEach((e) => open.add(e.id));
-    v.filter((e) => openHumanIds.has(e.id)).forEach((e) => open.add(e.id));
     if (focusEvent) open.add(focusEvent);
     const q = search.trim();
     if (q) messageHits(v, q).forEach((e) => open.add(e.id));

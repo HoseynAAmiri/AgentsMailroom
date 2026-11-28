@@ -190,7 +190,6 @@ test("click-resolution closes targeted human.needed without adding a fake messag
       in_reply_to: "e8715",
       body: "",
       resolved_by_click: true,
-      resolved_via: "muse_chat",
     }),
   ];
 
@@ -203,7 +202,6 @@ test("click-resolution closes targeted human.needed without adding a fake messag
     targetId: "e8715",
     ts: "2026-11-28T15:05:00Z",
     resolved_by_click: true,
-    resolved_via: "muse_chat",
   });
 
   const ms = mailState(undefined);
@@ -232,7 +230,6 @@ test("click-resolving one of two open human.needed items in a thread leaves the 
       in_reply_to: "e4502",
       body: "",
       resolved_by_click: true,
-      resolved_via: null,
     }),
   ];
 
@@ -255,7 +252,6 @@ test("click-resolving one of two open human.needed items in a thread leaves the 
       in_reply_to: "e4519",
       body: "",
       resolved_by_click: true,
-      resolved_via: "terminal",
     }),
   ];
   const openAfterBoth = openHumanRequests(allResolved);

@@ -18,8 +18,8 @@ import {
   type Thread,
 } from "@/lib/threads";
 import { executeClickResolution, selectResolvableTargets } from "@/lib/resolve-human";
-import type { Agent, BusEvent, ClickResolution, MailTaskIndex, ResolutionChannel, Snapshot } from "@/lib/types";
-import { buildLastActivityMap, displayName, RESOLUTION_CHANNEL_LABEL, resolveActivityNow } from "@/lib/format";
+import type { Agent, BusEvent, ClickResolution, MailTaskIndex, Snapshot } from "@/lib/types";
+import { buildLastActivityMap, displayName, resolveActivityNow } from "@/lib/format";
 
 export type View = "goals" | "mail" | "team" | "machine" | "files";
 export type ComposeMode = "new" | "reply" | "replyAll" | "forward";
@@ -59,7 +59,7 @@ interface Ctx {
   resolveTarget: BusEvent[] | null;
   promptResolve: (targets: BusEvent[]) => void;
   cancelResolve: () => void;
-  confirmResolve: (via: ResolutionChannel | null) => Promise<boolean>;
+  confirmResolve: () => Promise<boolean>;
   resolving: boolean;
   view: View;
   setView: (v: View) => void;
@@ -240,11 +240,11 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
   }, [resolving]);
 
   const confirmResolve = useCallback(
-    async (via: ResolutionChannel | null) => {
+    async () => {
       if (!resolveTarget?.length || resolving) return false;
       setResolving(true);
       try {
-        const created = await executeClickResolution(resolveTarget, via, api.resolveHuman);
+        const created = await executeClickResolution(resolveTarget, api.resolveHuman);
         appendEvents(created);
         const unreadIds = resolveTarget.filter(ms.isUnread).map((e) => e.id);
         if (unreadIds.length) {
@@ -253,8 +253,7 @@ export function MailroomProvider({ children }: { children: ReactNode }) {
         const firstId = resolveTarget[0].id;
         const count = created.length;
         setResolveTarget(null);
-        const suffix = via ? ` (${RESOLUTION_CHANNEL_LABEL[via]})` : "";
-        toast.success(count === 1 ? `Marked ${firstId} resolved${suffix}` : `Marked ${count} items resolved${suffix}`);
+        toast.success(count === 1 ? `Marked ${firstId} resolved` : `Marked ${count} items resolved`);
         void refresh();
         return true;
       } catch (err) {

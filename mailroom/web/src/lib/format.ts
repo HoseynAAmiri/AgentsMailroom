@@ -1,4 +1,4 @@
-import type { Agent, BusEvent, MailTask, Presence, ResolutionChannel } from "./types";
+import type { Agent, BusEvent, MailTask, Presence } from "./types";
 
 export function ageMin(ts?: string | null): number {
   if (!ts) return Infinity;
@@ -200,18 +200,6 @@ export const TYPE_STYLE: Record<string, { label: string; cls: string }> = {
   "human.needed": { label: "needs you", cls: "bg-amber-500/20 font-semibold text-amber-800 dark:text-amber-200" },
   "human.resolved": { label: "resolved", cls: "bg-emerald-500/15 font-semibold text-emerald-700 dark:text-emerald-300" },
   "agent.status": { label: "status", cls: "bg-muted text-muted-foreground" },
-};
-
-export const RESOLUTION_PRESETS: readonly { value: ResolutionChannel; label: string }[] = [
-  { value: "muse_chat", label: "Muse chat" },
-  { value: "terminal", label: "Terminal" },
-  { value: "other", label: "Other" },
-];
-
-export const RESOLUTION_CHANNEL_LABEL: Record<ResolutionChannel, string> = {
-  muse_chat: "Muse chat",
-  terminal: "Terminal",
-  other: "Other",
 };
 
 export const GOAL_STATE_STYLE: Record<MailTask["state"], { label: string; cls: string }> = {

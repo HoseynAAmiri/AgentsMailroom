@@ -373,9 +373,6 @@ def migrate_snapshot_repo(work_tree: Path, git_dir: Path, old_git_dir: Path) -> 
     return head.stdout.strip()
 
 
-SAFE_RESOLUTION_CHANNELS = {"muse_chat", "terminal", "other"}
-
-
 def user_involved(e: dict) -> bool:
     people = [e.get("from"), e.get("to"), *(e.get("cc") or [])]
     return (
@@ -397,9 +394,6 @@ def project(e: dict) -> dict:
         }
         if e.get("task_id"):
             out["task_id"] = e.get("task_id")
-        via = e.get("resolved_via")
-        if isinstance(via, str) and via in SAFE_RESOLUTION_CHANNELS:
-            out["resolved_via"] = via
         return out
     if user_involved(e):
         return {"id": e.get("id"), "ts": e.get("ts"), "type": e.get("type"), "user_involved": True}

@@ -851,27 +851,6 @@ VALID_TYPES = {
     "agent.status",
 }
 
-RESOLUTION_CHANNELS: dict[str, str] = {
-    "muse_chat": "muse_chat",
-    "muse chat": "muse_chat",
-    "chat": "muse_chat",
-    "terminal": "terminal",
-    "other": "other",
-}
-
-
-def normalize_resolution_channel(raw: Any) -> str | None:
-    if raw is None:
-        return None
-    if not isinstance(raw, str):
-        raise ValueError("resolved_via must be muse_chat, terminal, other, or empty")
-    cleaned = raw.strip().lower()
-    if not cleaned:
-        return None
-    if cleaned in RESOLUTION_CHANNELS:
-        return RESOLUTION_CHANNELS[cleaned]
-    raise ValueError("resolved_via must be muse_chat, terminal, other, or empty")
-
 # The Team page controls message routes for each installation.
 DEFAULT_LINKS: list[dict[str, str]] = []
 TOOL_TO_CLI = {"claude": "claude", "codex": "codex", "antigravity": "agy", "agy": "agy", "cursor": "cursor-agent", "opencode": "opencode"}
@@ -1303,12 +1282,11 @@ def append_event(event: dict[str, Any], check_route: bool = True) -> dict[str, A
     return event
 
 
-def resolve_human_needed(in_reply_to: Any, resolved_via: Any = None) -> tuple[dict[str, Any], bool]:
+def resolve_human_needed(in_reply_to: Any) -> tuple[dict[str, Any], bool]:
     """Mark a human.needed event resolved by click without sending a fake text message."""
     if not isinstance(in_reply_to, str) or not in_reply_to.strip():
         raise ValueError("in_reply_to is required to resolve a human.needed item")
     target_id = in_reply_to.strip()
-    via = normalize_resolution_channel(resolved_via)
     EVENTS_PATH.parent.mkdir(parents=True, exist_ok=True)
     with bus_lock():
         with _EVENT_INDEX.lock:
@@ -1335,7 +1313,6 @@ def resolve_human_needed(in_reply_to: Any, resolved_via: Any = None) -> tuple[di
                 "body": "",
                 "refs": [],
                 "resolved_by_click": True,
-                "resolved_via": via,
             }
             with EVENTS_PATH.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(event, ensure_ascii=False) + "\n")
@@ -3230,8 +3207,11 @@ class BusHandler(SimpleHTTPRequestHandler):
                     self._send_json(400, {"error": "human.resolved does not accept a text body; use message to reply"})
                     return
                 raw_via = data.get("resolved_via") if "resolved_via" in data else data.get("via")
+                if raw_via is not None and (not isinstance(raw_via, str) or raw_via.strip()):
+                    self._send_json(400, {"error": "human.resolved does not accept resolved_via"})
+                    return
                 try:
-                    resolved_ev, created = resolve_human_needed(data.get("in_reply_to"), raw_via)
+                    resolved_ev, created = resolve_human_needed(data.get("in_reply_to"))
                 except LookupError as exc:
                     self._send_json(404, {"error": str(exc)})
                     return

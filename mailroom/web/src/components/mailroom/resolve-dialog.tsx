@@ -1,12 +1,10 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef } from "react";
 import { CheckCircle2, Loader2 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { RESOLUTION_PRESETS } from "@/lib/format";
-import { toggleResolutionPreset } from "@/lib/resolve-human";
-import { eventTaskId, snippet } from "@/lib/threads";
-import type { BusEvent, ResolutionChannel } from "@/lib/types";
+import { needsPreview } from "@/lib/resolve-human";
+import { eventTaskId } from "@/lib/threads";
+import type { BusEvent } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { useMailroom } from "./context";
 
@@ -23,69 +21,28 @@ function ResolveDialogForm({
   descId: string;
   resolving: boolean;
   onCancel: () => void;
-  onConfirm: (via: ResolutionChannel | null) => Promise<boolean>;
+  onConfirm: () => Promise<boolean>;
 }) {
-  const { agents, taskTags } = useMailroom();
-  const [via, setVia] = useState<ResolutionChannel | null>(null);
+  const { taskTags } = useMailroom();
   const plural = targets.length > 1;
+  const first = targets[0];
+  const firstTag = eventTaskId(first, taskTags);
+  const summaryLine = plural
+    ? targets.map((e) => e.id).join(", ")
+    : `${first.id}${firstTag ? ` · ${firstTag}` : ""} — ${needsPreview(first, 90)}`;
 
   return (
     <>
       <div className="space-y-1.5">
         <h1 id={titleId} className="font-heading text-base leading-snug font-semibold">
-          {plural ? `Mark ${targets.length} needs-you items as resolved?` : "Mark needs-you item as resolved?"}
+          {plural
+            ? `Are you sure you answered these ${targets.length} items or want them marked resolved?`
+            : "Are you sure you answered this or want it marked resolved?"}
         </h1>
-        <p id={descId} className="text-sm text-muted-foreground">
-          Use this when you already answered outside Mailroom. No message text is sent.
+        <p id={descId} className="truncate text-xs text-muted-foreground" title={summaryLine}>
+          {summaryLine}
         </p>
       </div>
-
-      <div className="max-h-36 space-y-1.5 overflow-y-auto rounded-lg border bg-muted/40 p-2.5 text-xs">
-        {targets.map((e) => {
-          const tag = eventTaskId(e, taskTags);
-          const sender = agents.get(e.from)?.name ?? e.from;
-          return (
-            <div key={e.id} className="space-y-0.5">
-              <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
-                <span className="font-semibold text-foreground">{e.id}</span>
-                {tag && <span>· {tag}</span>}
-                <span>· from {sender}</span>
-              </div>
-              <p className="line-clamp-2 font-sans text-foreground/90">
-                {e.subject || snippet(e.body, 140)}
-              </p>
-            </div>
-          );
-        })}
-      </div>
-
-      <fieldset className="space-y-2" disabled={resolving}>
-        <legend className="text-xs font-medium text-muted-foreground">
-          Where did you answer? (optional)
-        </legend>
-        <div className="flex flex-wrap gap-1.5">
-          {RESOLUTION_PRESETS.map((preset) => {
-            const active = via === preset.value;
-            return (
-              <button
-                key={preset.value}
-                type="button"
-                aria-pressed={active}
-                data-resolution-preset={preset.value}
-                onClick={() => setVia((cur) => toggleResolutionPreset(cur, preset.value))}
-                className={cn(
-                  "inline-flex min-h-8 items-center rounded-md border px-2.5 py-1 text-xs font-medium transition-colors touch:min-h-10",
-                  active
-                    ? "tool-active border-transparent"
-                    : "bg-background text-foreground/85 hover:bg-muted hover:text-foreground",
-                )}
-              >
-                {preset.label}
-              </button>
-            );
-          })}
-        </div>
-      </fieldset>
 
       <div className="-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t bg-muted/50 p-4 sm:flex-row sm:justify-end">
         <Button
@@ -103,7 +60,7 @@ function ResolveDialogForm({
           size="sm"
           disabled={resolving}
           data-confirm-resolve="true"
-          onClick={() => void onConfirm(via)}
+          onClick={() => void onConfirm()}
         >
           {resolving ? <Loader2 className="animate-spin" aria-hidden="true" /> : <CheckCircle2 aria-hidden="true" />}
           Mark resolved
