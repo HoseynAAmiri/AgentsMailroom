@@ -44,14 +44,14 @@ def call(method, path, body=None, timeout=30):
 def add_todo_parser(sub, *, local=False):
     todo = sub.add_parser("todo", help="Read and update the goal tracker")
     commands = todo.add_subparsers(dest="action", required=True)
-    names = ["list", "show", "add", "update", "link"]
+    names = ["list", "show", "add", "update", "link", "sync-files"]
     if local:
         names += ["seed", "export", "goal-add", "goal-update", "goal-remove", "remove", "move", "unlink", "tag"]
     for name in names:
         command = commands.add_parser(name)
         if name in {"show", "update", "link", "unlink", "goal-update", "goal-remove", "remove", "move"}:
             command.add_argument("id")
-        if name in {"add", "update", "link"}:
+        if name in {"add", "update", "link", "sync-files"}:
             command.add_argument("--agent", required=not local)
         if name in {"add", "goal-add", "goal-update"}:
             command.add_argument("--title", required=True)
@@ -78,6 +78,16 @@ def add_todo_parser(sub, *, local=False):
             command.add_argument("--direction", required=True, choices=("up", "down", "top"))
         if name in {"link", "unlink"}:
             command.add_argument("--path", required=True)
+        if name == "link":
+            command.add_argument("--ref", help="Git ref/commit to snapshot this file into the Mailroom database (custom ref requires admin/local CLI)")
+            if local:
+                command.add_argument("--source-file", dest="source_file", help="Local file to ingest into the Mailroom database")
+        if name == "sync-files":
+            command.add_argument("--ref", default="auto", help="Git ref/commit to sync (default: auto -> main/origin/main; custom ref requires admin/local CLI)")
+            command.add_argument("--path", help="Optional single repository-relative path to sync")
+            if local:
+                command.add_argument("--source-file", dest="source_file", help="Local file to ingest for --path")
+                command.add_argument("--overwrite-local", dest="overwrite_local", action="store_true", help="Overwrite existing local-file overrides from git")
         if name == "tag":
             command.add_argument("--event-id", required=True)
             command.add_argument("--id", help="Omit to clear the task tag")

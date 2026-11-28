@@ -16,6 +16,8 @@ from __future__ import annotations
 import argparse
 from bisect import bisect_left, bisect_right
 import gzip
+import hashlib
+import importlib.util
 import fcntl
 import ipaddress
 import io
@@ -34,14 +36,50 @@ from contextlib import contextmanager
 from functools import lru_cache
 from datetime import datetime, timedelta, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 BUS_PY = Path(__file__).resolve()
+_SIBLING_CACHE: dict[str, Any] = {}
+_SIBLING_LOCK = threading.RLock()
+
+
+def _sibling_module(name: str) -> Any:
+    cached = _SIBLING_CACHE.get(name)
+    if cached is not None:
+        return cached
+    with _SIBLING_LOCK:
+        cached = _SIBLING_CACHE.get(name)
+        if cached is not None:
+            return cached
+        target = (BUS_PY.parent / f"{name}.py").resolve()
+        mod = sys.modules.get(name)
+        runtime_name = f"_mailroom_runtime_{name}"
+        for candidate in (mod, sys.modules.get(runtime_name)):
+            if candidate is not None:
+                mfile = getattr(candidate, "__file__", None)
+                if mfile and Path(mfile).resolve() == target:
+                    _SIBLING_CACHE[name] = candidate
+                    return candidate
+        mod_name = runtime_name if mod is not None else name
+        spec = importlib.util.spec_from_file_location(mod_name, target)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Cannot load sibling module {target}")
+        loaded = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(loaded)
+        except BaseException:
+            sys.modules.pop(mod_name, None)
+            raise
+        sys.modules[mod_name] = loaded
+        _SIBLING_CACHE[name] = loaded
+        return loaded
+
+
 if str(BUS_PY.parent) not in sys.path:
     sys.path.insert(0, str(BUS_PY.parent))
-from coord_store import resolve_store  # noqa: E402  (store locator shared with the watchers)
+resolve_store = _sibling_module("coord_store").resolve_store  # (store locator shared with the watchers)
 
 # The code (this file) is the Mailroom Python runtime; the data
 # lives in the agents-mailroom store (COORD_STORE, config file, or ../agents_mailroom).
@@ -96,8 +134,15 @@ USER_STATE_PATH = BUS_DIR / "user_state.json"
 SESSIONS_DIR = BUS_DIR / "sessions"
 
 
+FILE_SYNC_PREFIXES = ("docs/goals-and-tasks/",)
+FILE_SYNC_INTERVAL_S = 15
+_SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
+_FILE_SYNC_LOCK = threading.Lock()
+_DB_DOC_TAG_CACHE: dict[str, str | None] = {}
+
+
 def todo_store():
-    from todo_store import TodoStore
+    TodoStore = _sibling_module("todo_store").TodoStore
 
     root = Path(os.environ.get("BUS_TODO_DIR") or COORD_DIR / "todo")
     # The reviewed roadmap seed stays in the repository; the generated live status is private
@@ -107,7 +152,329 @@ def todo_store():
     roadmap = REPO_DIR / "docs" / "GOALS.md"
     if not roadmap.is_file() and (APP_DIR / "docs" / "GOALS.md").is_file():
         roadmap = APP_DIR / "docs" / "GOALS.md"
-    return TodoStore(root / "tasks.sqlite3", roadmap, status)
+    db_url = (os.environ.get("MAILROOM_DB_URL") or os.environ.get("BUS_DB_URL") or "").strip() or None
+    backend_spec = (os.environ.get("MAILROOM_DB_BACKEND") or "").strip() or None
+    db_token = (os.environ.get("MAILROOM_DB_TOKEN") or "").strip() or None
+    return TodoStore(root / "tasks.sqlite3", roadmap, status, db_url=db_url, token=db_token, backend_spec=backend_spec)
+
+
+def _run_repo_git(args: list[str], *, input_bytes: bytes | None = None, text: bool = True) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", "-C", str(REPO_DIR), *args],
+        input=input_bytes,
+        capture_output=True,
+        text=text,
+        timeout=30,
+    )
+
+
+def _git_rev_parse(ref: str) -> str | None:
+    if not ref or ref.startswith("-"):
+        return None
+    proc = _run_repo_git(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"])
+    if proc.returncode != 0:
+        return None
+    sha = proc.stdout.strip().lower()
+    return sha if _SHA40_RE.fullmatch(sha) else None
+
+
+def _resolve_git_sync_ref(ref: str = "auto") -> tuple[str, str] | None:
+    req = (ref or "auto").strip()
+    if not req or req == "auto":
+        local_sha = _git_rev_parse("refs/heads/main")
+        origin_sha = _git_rev_parse("refs/remotes/origin/main")
+        if local_sha and origin_sha:
+            if local_sha == origin_sha:
+                return "main", local_sha
+            anc = _run_repo_git(["merge-base", "--is-ancestor", local_sha, origin_sha])
+            if anc.returncode == 0:
+                return "origin/main", origin_sha
+            return "main", local_sha
+        if local_sha:
+            return "main", local_sha
+        if origin_sha:
+            return "origin/main", origin_sha
+        return None
+    if req.startswith("-"):
+        return None
+    sha = _git_rev_parse(req)
+    return (req, sha) if sha else None
+
+
+def _git_read_blob_at_commit(commit_sha: str, rel_path: str) -> bytes | None:
+    if not _SHA40_RE.fullmatch(commit_sha) or rel_path.startswith("-"):
+        return None
+    proc = _run_repo_git(["cat-file", "blob", f"{commit_sha}:{rel_path}"], text=False)
+    if proc.returncode != 0:
+        return None
+    return proc.stdout
+
+
+def _git_cat_file_batch(oids: list[str]) -> dict[str, bytes]:
+    if not oids:
+        return {}
+    clean_oids = [oid for oid in dict.fromkeys(oids) if _SHA40_RE.fullmatch(oid)]
+    if not clean_oids:
+        return {}
+    payload = ("\n".join(clean_oids) + "\n").encode("ascii")
+    proc = _run_repo_git(["cat-file", "--batch"], input_bytes=payload, text=False)
+    if proc.returncode != 0:
+        raise RuntimeError(f"git cat-file --batch failed: {proc.stderr.decode('utf-8', errors='replace').strip()}")
+    out: dict[str, bytes] = {}
+    buf = proc.stdout
+    pos = 0
+    total = len(buf)
+    while pos < total:
+        nl = buf.find(b"\n", pos)
+        if nl == -1:
+            break
+        header = buf[pos:nl].decode("ascii", errors="replace").split()
+        pos = nl + 1
+        if len(header) >= 3 and header[1] == "blob":
+            oid = header[0].lower()
+            size = int(header[2])
+            out[oid] = buf[pos : pos + size]
+            pos += size + 1
+        elif len(header) >= 2 and header[1] == "missing":
+            raise RuntimeError(f"Missing git object {header[0]}")
+        else:
+            raise RuntimeError(f"Unexpected git cat-file --batch header: {header!r}")
+    return out
+
+
+def _is_syncable_repo_path(rel_path: str, size: int) -> bool:
+    if rel_path.startswith(ATTACH_REF_PREFIX):
+        return False
+    if size < 0 or size > VIEW_MAX_BYTES:
+        return False
+    parts = PurePosixPath(rel_path).parts
+    if not parts or any(p.startswith(".") for p in parts):
+        return False
+    ext = PurePosixPath(rel_path).suffix.lower()
+    return ext in TEXT_EXT or ext in MIME
+
+
+def sync_repo_files(
+    ref: str = "auto",
+    *,
+    prefixes: tuple[str, ...] = FILE_SYNC_PREFIXES,
+    include_linked: bool = True,
+    editor: str = "sync",
+    only_if_changed: bool = False,
+    overwrite_local: bool = False,
+    store: Any = None,
+) -> dict[str, Any]:
+    _ts = _sibling_module("todo_store")
+    TodoError, relative_file = _ts.TodoError, _ts.relative_file
+
+    with _FILE_SYNC_LOCK:
+        active_store = store or todo_store()
+        if not active_store.initialized():
+            if only_if_changed:
+                return {"skipped": True, "reason": "not_initialized"}
+            raise TodoError("Goal tracking has not been seeded", 503)
+
+        resolved = _resolve_git_sync_ref(ref)
+        if resolved is None:
+            if ref in ("", "auto"):
+                return {"skipped": True, "reason": "no_git_main_ref"}
+            raise TodoError(f"Git ref {ref!r} not found in workspace", 400)
+        resolved_ref, commit_sha = resolved
+
+        existing = {r["path"]: r for r in active_store.list_file_records()}
+        if only_if_changed:
+            sync_state = active_store.file_sync_status()
+            linked_candidates = [
+                p for p in active_store.linked_paths()
+                if not p.startswith(ATTACH_REF_PREFIX) and p not in existing
+            ]
+            if (
+                sync_state.get("source_commit") == commit_sha
+                and int(sync_state.get("file_count") or 0) > 0
+                and not linked_candidates
+            ):
+                return {"skipped": True, "reason": "unchanged", "source_ref": resolved_ref, "source_commit": commit_sha}
+
+        targets = [p for p in prefixes if p]
+        if include_linked:
+            for p in sorted(active_store.linked_paths()):
+                if not p.startswith(ATTACH_REF_PREFIX) and not any(p.startswith(pref) for pref in targets):
+                    targets.append(p)
+        if not targets:
+            return {"skipped": True, "reason": "no_targets", "source_ref": resolved_ref, "source_commit": commit_sha}
+
+        proc = _run_repo_git(["ls-tree", "-r", "-z", "-l", commit_sha, "--", *targets], text=False)
+        if proc.returncode != 0:
+            raise TodoError(f"git ls-tree failed for {resolved_ref}", 500)
+
+        candidates: list[dict[str, Any]] = []
+        need_oids: list[str] = []
+        seen_paths: set[str] = set()
+        for raw_entry in proc.stdout.split(b"\x00"):
+            if not raw_entry:
+                continue
+            tab_idx = raw_entry.find(b"\t")
+            if tab_idx == -1:
+                continue
+            meta = raw_entry[:tab_idx].decode("ascii", errors="replace").split()
+            rel_raw = raw_entry[tab_idx + 1:].decode("utf-8", errors="surrogateescape")
+            if len(meta) < 4 or meta[1] != "blob" or meta[3] == "-":
+                continue
+            blob_oid = meta[2].lower()
+            size = int(meta[3])
+            try:
+                rel_path = relative_file(rel_raw)
+            except TodoError:
+                continue
+            if rel_path in seen_paths or not _is_syncable_repo_path(rel_path, size):
+                continue
+            seen_paths.add(rel_path)
+            prev = existing.get(rel_path)
+            if not overwrite_local and prev and prev.get("source_ref") == "local-file":
+                continue
+            candidates.append({"path": rel_path, "source_blob": blob_oid, "size": size})
+            if (
+                not prev
+                or prev.get("source_blob") != blob_oid
+                or not active_store.has_blob(prev.get("sha256") or "")
+            ):
+                need_oids.append(blob_oid)
+
+        blob_cache = _git_cat_file_batch(need_oids)
+
+        def _load_blob(rel_path: str, blob_oid: str) -> bytes:
+            data = blob_cache.get(blob_oid)
+            if data is None:
+                data = _git_read_blob_at_commit(commit_sha, rel_path)
+            if data is None:
+                raise TodoError(f"Unable to read git blob for {rel_path} at {commit_sha}", 500)
+            return data
+
+        res = active_store.upsert_files(
+            candidates,
+            prune_prefixes=tuple(prefixes),
+            keep_paths=sorted(seen_paths),
+            update_sync_state=True,
+            source_ref=resolved_ref,
+            source_commit=commit_sha,
+            editor=editor,
+            content_loader=_load_blob,
+        )
+        if res.get("updated") or res.get("pruned"):
+            todo_documents.cache_clear()
+        return res
+
+
+def sync_single_file(
+    path: str,
+    *,
+    ref: str | None = None,
+    source_file: str | None = None,
+    editor: str = "sync",
+    strict: bool = True,
+    overwrite_local: bool = False,
+    store: Any = None,
+) -> dict[str, Any]:
+    _ts = _sibling_module("todo_store")
+    TodoError, relative_file = _ts.TodoError, _ts.relative_file
+
+    with _FILE_SYNC_LOCK:
+        active_store = store or todo_store()
+        if not active_store.initialized():
+            raise TodoError("Goal tracking has not been seeded", 503)
+        clean = relative_file(path)
+        if clean.startswith(ATTACH_REF_PREFIX):
+            raise TodoError("Use attachment storage for coordination/attachments/", 400)
+        ext = PurePosixPath(clean).suffix.lower()
+        if ext not in TEXT_EXT and ext not in MIME:
+            if strict:
+                raise TodoError("Use a file format supported by the Mailroom viewer", 400)
+            return {"skipped": True, "reason": "unsupported_format"}
+
+        if source_file:
+            src = Path(os.path.expanduser(source_file))
+            try:
+                resolved_src = src.resolve(strict=True)
+            except OSError as exc:
+                raise TodoError(f"Source file not found: {source_file}", 404) from exc
+            if not resolved_src.is_file():
+                raise TodoError(f"Source path is not a regular file: {source_file}", 400)
+            raw = resolved_src.read_bytes()
+            if len(raw) > VIEW_MAX_BYTES:
+                raise TodoError(f"Source file exceeds {VIEW_MAX_BYTES} bytes", 400)
+            res = active_store.upsert_files(
+                [{"path": clean, "content": raw, "source_ref": "local-file", "source_commit": "", "source_blob": ""}],
+                update_sync_state=False,
+                source_ref="local-file",
+                source_commit="",
+                editor=editor,
+            )
+            todo_documents.cache_clear()
+            return res
+
+        if not overwrite_local:
+            existing_rec = active_store.get_file_record(clean)
+            if existing_rec and existing_rec.get("source_ref") == "local-file":
+                return {
+                    "skipped": True,
+                    "reason": "local_file_override",
+                    "path": clean,
+                    "source_ref": "local-file",
+                }
+
+        resolved = _resolve_git_sync_ref(ref or "auto")
+        if resolved is not None:
+            resolved_ref, commit_sha = resolved
+            raw = _git_read_blob_at_commit(commit_sha, clean)
+            if raw is not None:
+                if len(raw) > VIEW_MAX_BYTES:
+                    raise TodoError(f"File exceeds {VIEW_MAX_BYTES} bytes: {clean}", 400)
+                ls_proc = _run_repo_git(["ls-tree", "-l", commit_sha, "--", clean])
+                blob_oid = ""
+                if ls_proc.returncode == 0 and ls_proc.stdout.strip():
+                    parts = ls_proc.stdout.strip().splitlines()[0].split()
+                    if len(parts) >= 4:
+                        blob_oid = parts[2].lower()
+                res = active_store.upsert_files(
+                    [{"path": clean, "content": raw, "source_ref": resolved_ref, "source_commit": commit_sha, "source_blob": blob_oid}],
+                    update_sync_state=False,
+                    source_ref=resolved_ref,
+                    source_commit=commit_sha,
+                    editor=editor,
+                )
+                todo_documents.cache_clear()
+                return res
+            if strict and ref:
+                raise TodoError(f"File {clean!r} not found at ref {resolved_ref!r}", 404)
+        elif strict and ref and ref != "auto":
+            raise TodoError(f"Git ref {ref!r} not found in workspace", 400)
+
+        # Workspace fallback ONLY when unrecorded on git main (e.g. local uncommitted fixture in tests)
+        ws_file = REPO_DIR.joinpath(*clean.split("/"))
+        if viewable_path(ws_file, REPO_DIR) and ws_file.is_file():
+            raw = ws_file.read_bytes()
+            if len(raw) <= VIEW_MAX_BYTES:
+                res = active_store.upsert_files(
+                    [{"path": clean, "content": raw, "source_ref": "workspace", "source_commit": "", "source_blob": ""}],
+                    update_sync_state=False,
+                    source_ref="workspace",
+                    source_commit="",
+                    editor=editor,
+                )
+                todo_documents.cache_clear()
+                return res
+        if strict:
+            raise TodoError(f"File {clean!r} not found at git ref or workspace", 404)
+        return {"skipped": True, "reason": "not_found"}
+
+
+def file_sync_loop() -> None:
+    while True:
+        try:
+            sync_repo_files(ref="auto", editor="auto-sync", only_if_changed=True)
+        except Exception as exc:
+            sys.stderr.write(f"[file-sync] {exc}\n")
+        time.sleep(FILE_SYNC_INTERVAL_S)
 
 
 def todo_last_event() -> int:
@@ -116,8 +483,9 @@ def todo_last_event() -> int:
         return _EVENT_INDEX.max_id
 
 
-def todo_mutation(values, *, admin: bool):
-    from todo_store import TodoError, relative_file
+def todo_mutation(values, *, admin: bool, local_cli: bool = False):
+    _ts = _sibling_module("todo_store")
+    TodoError, relative_file = _ts.TodoError, _ts.relative_file
 
     if not isinstance(values, dict):
         raise TodoError("Expected a JSON object")
@@ -128,13 +496,61 @@ def todo_mutation(values, *, admin: bool):
     agents = {row["id"]: row for row in registry["agents"]}
     if editor == "user" and not admin or editor != "user" and (editor not in agents or agent_ended(agents[editor])):
         raise TodoError("An active agent ID or the USER admin port is required", 403)
-    if values.get("action") == "tag" and editor == "user":
+
+    action = values.get("action")
+    if values.get("source_file") and not local_cli:
+        raise TodoError("--source-file is restricted to local CLI usage", 403)
+    if values.get("overwrite_local") and not (admin or local_cli):
+        raise TodoError("--overwrite-local is restricted to admin or local CLI", 403)
+    req_ref = values.get("ref")
+    if action in {"sync-files", "link"} and req_ref is not None:
+        if not isinstance(req_ref, str):
+            raise TodoError("Custom git ref is restricted to admin or local CLI" if not (admin or local_cli) else "Git ref must be text", 403 if not (admin or local_cli) else 400)
+        if not (admin or local_cli) and req_ref.strip() not in {"", "auto"}:
+            raise TodoError("Custom git ref is restricted to admin or local CLI", 403)
+
+    store = todo_store()
+    if not store.initialized():
+        raise TodoError("Goal tracking has not been seeded", 503)
+
+    if action == "sync-files":
+        target_path = values.get("path")
+        src_file = values.get("source_file")
+        ref_clean = req_ref.strip() if isinstance(req_ref, str) else ""
+        overwrite_local = bool(values.get("overwrite_local"))
+        if src_file and not target_path:
+            raise TodoError("--path is required with --source-file", 400)
+        if target_path or src_file:
+            sync_res = sync_single_file(
+                str(target_path),
+                ref=ref_clean or None,
+                source_file=str(src_file) if src_file else None,
+                editor=editor,
+                strict=True,
+                overwrite_local=overwrite_local,
+                store=store,
+            )
+        else:
+            sync_res = sync_repo_files(
+                ref=ref_clean or "auto",
+                editor=editor,
+                overwrite_local=overwrite_local,
+                store=store,
+            )
+        return {"file_sync": sync_res}
+
+    if action == "tag" and editor == "user":
         event_id = values.get("event_id")
         with _EVENT_INDEX.lock:
             _EVENT_INDEX.refresh()
             if not isinstance(event_id, str) or event_id not in _EVENT_INDEX.positions:
                 raise TodoError("Unknown message ID", 404)
-    if values.get("action") in ("link", "unlink"):
+    sync_ref = values.pop("ref", None) if isinstance(values, dict) else None
+    sync_source_file = values.pop("source_file", None) if isinstance(values, dict) else None
+    sync_overwrite_local = bool(values.pop("overwrite_local", False)) if isinstance(values, dict) else False
+    link_target_root = None
+    link_path = None
+    if action in ("link", "unlink"):
         path = relative_file(values.get("path"))
         target, root = logical_file(path)
         if not viewable_path(target, root):
@@ -142,10 +558,23 @@ def todo_mutation(values, *, admin: bool):
         if root != ATTACH_DIR and Path(path).suffix.lower() not in TEXT_EXT and Path(path).suffix.lower() not in MIME:
             raise TodoError("Use a file format supported by the Mailroom viewer")
         values = {**values, "path": path}
-    store = todo_store()
-    if not store.initialized():
-        raise TodoError("Goal tracking has not been seeded", 503)
-    return store.mutate(values, editor, set(agents))
+        link_target_root = root
+        link_path = path
+
+    res = store.mutate(values, editor, set(agents))
+    if action == "link" and link_path and link_target_root != ATTACH_DIR:
+        sync_ref_clean = sync_ref.strip() if isinstance(sync_ref, str) else ""
+        strict_sync = bool(sync_ref_clean or sync_source_file)
+        res["file_sync"] = sync_single_file(
+            link_path,
+            ref=sync_ref_clean or None,
+            source_file=str(sync_source_file) if sync_source_file else None,
+            editor=editor,
+            strict=strict_sync,
+            overwrite_local=sync_overwrite_local,
+            store=store,
+        )
+    return res
 
 
 _TASK_ID_LINE_RE = re.compile(r"^task_id:[ \t]*['\"]?(G[1-9]\d*\.[1-9]\d*)['\"]?[ \t]*\r?$", re.M)
@@ -180,28 +609,11 @@ def _infer_doc_task_id(label: str) -> str | None:
 
 
 def _tracker_task_state() -> tuple[set[str], set[str], dict[str, str]] | None:
-    """Return (active_ids, retired_ids, tag_overrides) from SQLite when seeded, else None."""
-    from contextlib import closing
+    """Return (active_ids, retired_ids, tag_overrides) via DB abstraction when seeded, else None."""
     try:
-        store = todo_store()
-        if not store.initialized():
-            return None
-        with closing(store.connect()) as conn:
-            has_tasks = conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='tasks'"
-            ).fetchone()
-            if not has_tasks:
-                return None
-            rows = conn.execute(
-                "SELECT tasks.id, tasks.removed, goals.removed "
-                "FROM tasks JOIN goals ON goals.id = tasks.goal_id"
-            ).fetchall()
-            tags = dict(conn.execute("SELECT event_id, task_id FROM tags"))
+        return todo_store().task_membership()
     except Exception:
         return None
-    active = {row[0] for row in rows if not row[1] and not row[2]}
-    retired = {row[0] for row in rows if row[0] not in active}
-    return active, retired, tags
 
 
 def _task_id_warning(event: dict[str, Any]) -> str | None:
@@ -224,13 +636,7 @@ def _task_id_warning(event: dict[str, Any]) -> str | None:
     return f"warning: {kind} {eid} has no active G#.# task_id; pass --task-id <G#.#>."
 
 
-@lru_cache(maxsize=1024)
-def todo_file_tag(path: Path, mtime_ns: int, size: int) -> str | None:
-    try:
-        with path.open("rb") as stream:
-            header = stream.read(4096).decode("utf-8", errors="replace")
-    except OSError:
-        return None
+def _extract_task_id_from_header(header: str) -> str | None:
     front = re.match(r"\A---\r?\n(.*?)\r?\n---(?:\r?\n|$)", header, re.S)
     if front:
         match = _TASK_ID_LINE_RE.search(front[1])
@@ -249,21 +655,43 @@ def todo_file_tag(path: Path, mtime_ns: int, size: int) -> str | None:
     return None
 
 
+@lru_cache(maxsize=1024)
+def todo_file_tag(path: Path, mtime_ns: int, size: int) -> str | None:
+    try:
+        with path.open("rb") as stream:
+            header = stream.read(4096).decode("utf-8", errors="replace")
+    except OSError:
+        return None
+    return _extract_task_id_from_header(header)
+
+
+def _db_markdown_task_tag(store: Any, label: str, sha256: str) -> str | None:
+    if sha256 in _DB_DOC_TAG_CACHE:
+        return _DB_DOC_TAG_CACHE[sha256]
+    try:
+        loaded = store.read_file_content(label)
+    except (OSError, ValueError):
+        loaded = None
+    if not loaded:
+        return None
+    _, raw = loaded
+    tag = _extract_task_id_from_header(raw[:4096].decode("utf-8", errors="replace"))
+    if len(_DB_DOC_TAG_CACHE) > 4096:
+        _DB_DOC_TAG_CACHE.clear()
+    _DB_DOC_TAG_CACHE[sha256] = tag
+    return tag
+
+
 @lru_cache(maxsize=2)
 def todo_documents(window: int):
     files = []
-    # Cache the path inventory briefly. Each changed file needs only its leading metadata.
-    docs = REPO_DIR / "docs"
-    paths = [(ATTACH_DIR / row["name"], f"coordination/attachments/{row['name']}", ATTACH_DIR)
-             for row in attachments_list(limit=5000)]
-    for directory, names, children in os.walk(docs):
-        names[:] = [name for name in names if not name.startswith(".") and name not in {"archive", "_templates"}]
-        paths.extend((path, path.relative_to(REPO_DIR).as_posix(), docs)
-                     for child in children if child.endswith(".md") and not child.startswith(".")
-                     and child != "GOALS_STATUS.md" for path in (Path(directory) / child,))
-    for path, label, root in paths:
+    seen_labels: set[str] = set()
+    # Attachments live in STORE_DIR/attachments.
+    for row in attachments_list(limit=5000):
+        label = f"coordination/attachments/{row['name']}"
+        path = ATTACH_DIR / row["name"]
         try:
-            if not viewable_path(path, root):
+            if not viewable_path(path, ATTACH_DIR):
                 continue
             stat = path.stat()
             task = todo_file_tag(path, stat.st_mtime_ns, stat.st_size) if path.suffix.lower() == ".md" else None
@@ -272,12 +700,65 @@ def todo_documents(window: int):
             task = _resolve_task_alias(task)
         except OSError:
             continue
+        seen_labels.add(label)
         files.append((label, task, stat.st_mtime))
+
+    # DB-recorded docs/ take precedence over checkout files.
+    store = todo_store()
+    if store.initialized():
+        for rec in store.list_file_records("docs/"):
+            label = rec["path"]
+            parts = PurePosixPath(label).parts
+            if (
+                not label.endswith(".md")
+                or any(p.startswith(".") for p in parts)
+                or "archive" in parts
+                or "_templates" in parts
+                or parts[-1] == "GOALS_STATUS.md"
+                or label in seen_labels
+            ):
+                continue
+            task = _db_markdown_task_tag(store, label, rec["sha256"])
+            if task is None:
+                task = _infer_doc_task_id(label)
+            task = _resolve_task_alias(task)
+            try:
+                mtime = datetime.fromisoformat(str(rec.get("synced_at") or "")).timestamp()
+            except ValueError:
+                mtime = 0.0
+            seen_labels.add(label)
+            files.append((label, task, mtime))
+
+    # Fall back to workspace docs/ for any non-DB files.
+    docs = REPO_DIR / "docs"
+    if docs.is_dir():
+        for directory, names, children in os.walk(docs):
+            names[:] = [name for name in names if not name.startswith(".") and name not in {"archive", "_templates"}]
+            for child in children:
+                if not child.endswith(".md") or child.startswith(".") or child == "GOALS_STATUS.md":
+                    continue
+                path = Path(directory) / child
+                label = path.relative_to(REPO_DIR).as_posix()
+                if label in seen_labels:
+                    continue
+                try:
+                    if not viewable_path(path, docs):
+                        continue
+                    stat = path.stat()
+                    task = todo_file_tag(path, stat.st_mtime_ns, stat.st_size)
+                    if task is None:
+                        task = _infer_doc_task_id(label)
+                    task = _resolve_task_alias(task)
+                except OSError:
+                    continue
+                seen_labels.add(label)
+                files.append((label, task, stat.st_mtime))
     return files
 
 
 def todo_read(params, *, admin: bool):
-    from todo_store import TodoError, relative_file
+    _ts = _sibling_module("todo_store")
+    TodoError, relative_file = _ts.TodoError, _ts.relative_file
 
     store = todo_store()
     if not store.initialized():
@@ -1200,7 +1681,7 @@ def attachments_list(limit: int = 300, offset: int = 0, force: bool = False) -> 
 
 
 def list_repo_dir(rel: str) -> dict[str, Any]:
-    """List immediate non-hidden directory entries strictly inside REPO_DIR (excluding STORE_DIR)."""
+    """List directory entries merging workspace and DB-synced records cleanly."""
     clean = (rel or "").strip().replace("\\", "/")
     parts = [p for p in clean.split("/") if p and p != "."]
     if ".." in parts or any(p.startswith(".") for p in parts):
@@ -1215,41 +1696,93 @@ def list_repo_dir(rel: str) -> dict[str, Any]:
         raise FileNotFoundError("no such directory")
     if target == store_base or target.is_relative_to(store_base):
         raise FileNotFoundError("no such directory")
-    if not target.is_dir():
+
+    raw_prefix = "/".join(parts)
+    db_prefix = f"{raw_prefix}/" if raw_prefix else ""
+    store = todo_store()
+    db_records = store.list_file_records(prefix=db_prefix) if store.initialized() else []
+    disk_is_dir = target.is_dir()
+    if not disk_is_dir and not db_records:
         raise FileNotFoundError("no such directory")
 
-    entries: list[dict[str, Any]] = []
-    for child in target.iterdir():
-        name = child.name
-        if name.startswith(".") or name in {"__pycache__", "node_modules"}:
-            continue
-        try:
-            resolved_child = child.resolve()
-            if resolved_child == store_base or resolved_child.is_relative_to(store_base):
+    by_name: dict[str, dict[str, Any]] = {}
+    if disk_is_dir:
+        for child in target.iterdir():
+            name = child.name
+            if name.startswith(".") or name in {"__pycache__", "node_modules"}:
                 continue
-            if not viewable_path(resolved_child, base):
+            try:
+                resolved_child = child.resolve()
+                if resolved_child == store_base or resolved_child.is_relative_to(store_base):
+                    continue
+                if not viewable_path(resolved_child, base):
+                    continue
+                st = resolved_child.stat()
+                is_dir = resolved_child.is_dir()
+                is_file = resolved_child.is_file()
+            except OSError:
                 continue
-            st = resolved_child.stat()
-            is_dir = resolved_child.is_dir()
-            is_file = resolved_child.is_file()
-        except OSError:
+            if not (is_dir or is_file):
+                continue
+            rel_child = child.relative_to(base).as_posix()
+            ext = resolved_child.suffix.lower()
+            viewable = bool(is_file and (ext in TEXT_EXT or ext in MIME) and st.st_size <= VIEW_MAX_BYTES)
+            by_name[name] = {
+                "name": name,
+                "path": rel_child,
+                "kind": "dir" if is_dir else "file",
+                "size": 0 if is_dir else st.st_size,
+                "modified": iso_mtime(st.st_mtime),
+                "viewable": viewable,
+            }
+
+    for rec in db_records:
+        rec_path = rec["path"]
+        tail = rec_path[len(db_prefix):] if db_prefix else rec_path
+        if not tail:
             continue
-        if not (is_dir or is_file):
-            continue
-        rel_child = child.relative_to(base).as_posix()
-        ext = resolved_child.suffix.lower()
-        viewable = bool(is_file and (ext in TEXT_EXT or ext in MIME) and st.st_size <= VIEW_MAX_BYTES)
-        entries.append({
-            "name": name,
-            "path": rel_child,
-            "kind": "dir" if is_dir else "file",
-            "size": 0 if is_dir else st.st_size,
-            "modified": iso_mtime(st.st_mtime),
-            "viewable": viewable,
-        })
-    entries.sort(key=lambda row: (0 if row["kind"] == "dir" else 1, row["name"].lower(), row["name"]))
-    rel_dir = target.relative_to(base).as_posix() if target != base else ""
-    parent_dir = target.parent.relative_to(base).as_posix() if target != base else None
+        if "/" in tail:
+            sub_name = tail.split("/", 1)[0]
+            if not sub_name or sub_name.startswith(".") or sub_name in {"__pycache__", "node_modules"}:
+                continue
+            # Refuse virtual shadowing over an unsafe symlink on disk
+            cand = target / sub_name
+            if os.path.lexists(cand):
+                try:
+                    rc = cand.resolve()
+                    if rc == store_base or rc.is_relative_to(store_base) or not viewable_path(rc, base):
+                        continue
+                except OSError:
+                    continue
+            if sub_name not in by_name:
+                by_name[sub_name] = {
+                    "name": sub_name,
+                    "path": f"{raw_prefix}/{sub_name}" if raw_prefix else sub_name,
+                    "kind": "dir",
+                    "size": 0,
+                    "modified": str(rec.get("synced_at") or ""),
+                    "viewable": False,
+                    "source": "db",
+                }
+        else:
+            if tail.startswith("."):
+                continue
+            ext = PurePosixPath(rec_path).suffix.lower()
+            sz = int(rec["size"])
+            by_name[tail] = {
+                "name": tail,
+                "path": rec_path,
+                "kind": "file",
+                "size": sz,
+                "modified": str(rec.get("synced_at") or ""),
+                "viewable": bool((ext in TEXT_EXT or ext in MIME) and sz <= VIEW_MAX_BYTES),
+                "source": "db",
+                "sha256": rec.get("sha256"),
+            }
+
+    entries = sorted(by_name.values(), key=lambda row: (0 if row["kind"] == "dir" else 1, row["name"].lower(), row["name"]))
+    rel_dir = raw_prefix
+    parent_dir = PurePosixPath(raw_prefix).parent.as_posix() if raw_prefix else None
     if parent_dir == ".":
         parent_dir = ""
     return {"path": rel_dir, "abs_path": str(target), "parent": parent_dir, "entries": entries}
@@ -1990,8 +2523,8 @@ def cmd_dump(args: argparse.Namespace) -> int:
 
 
 def cmd_todo(args: argparse.Namespace) -> int:
-    from bus_client import todo_payload
-    from todo_store import TodoError
+    todo_payload = _sibling_module("bus_client").todo_payload
+    TodoError = _sibling_module("todo_store").TodoError
 
     try:
         if args.action == "seed":
@@ -1999,7 +2532,7 @@ def cmd_todo(args: argparse.Namespace) -> int:
         elif args.action in {"list", "show"}:
             result = todo_read({"id": getattr(args, "id", None)}, admin=False)
         else:
-            result = todo_mutation(todo_payload(args), admin=True)
+            result = todo_mutation(todo_payload(args), admin=True, local_cli=True)
     except (TodoError, OSError) as exc:
         print(json.dumps({"error": str(exc), "current": getattr(exc, "current", None)}), file=sys.stderr)
         return 2
@@ -2197,8 +2730,10 @@ class BusHandler(SimpleHTTPRequestHandler):
     def end_headers(self) -> None:
         if self._static_text_asset():
             self.send_header("Vary", "Accept-Encoding")
-        # Always revalidate the shell so phones pick up dashboard builds; hashed /_next/ assets are immutable.
-        if self.path.startswith("/_next/static/"):
+        if getattr(self, "_skip_default_cache_control", False):
+            self._skip_default_cache_control = False
+        elif self.path.startswith("/_next/static/"):
+            # Always revalidate the shell so phones pick up dashboard builds; hashed /_next/ assets are immutable.
             self.send_header("Cache-Control", "public, max-age=31536000, immutable")
         else:
             self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
@@ -2316,7 +2851,7 @@ class BusHandler(SimpleHTTPRequestHandler):
             self._send_json(200, tasks)
             return
         if parsed.path == "/api/todo":
-            from todo_store import TodoError
+            TodoError = _sibling_module("todo_store").TodoError
 
             try:
                 self._send_json(200, todo_read({key: value[0] for key, value in qs.items()}, admin=self.admin))
@@ -2407,15 +2942,86 @@ class BusHandler(SimpleHTTPRequestHandler):
             return
         self._send_attachment_file(f, force_download=force_download)
 
+    @staticmethod
+    def _etag_matches(header_val: str | None, etag: str) -> bool:
+        if not header_val:
+            return False
+        target = etag.strip().strip('"')
+        for part in header_val.split(","):
+            token = part.strip()
+            if token == "*":
+                return True
+            if token.startswith("W/"):
+                token = token[2:].strip()
+            if token.strip('"') == target:
+                return True
+        return False
+
     def send_repo_file(self, rel: str, *, force_download: bool = False) -> None:
-        """Show a supported file inside the configured workspace root."""
+        """Serve synced DB file records first, falling back to REPO_DIR only when unrecorded."""
+        BlobIntegrityError = _sibling_module("todo_store").BlobIntegrityError
+
         parts = [p for p in rel.split("/") if p]
-        if not parts or any(p.startswith(".") for p in parts):
+        if not parts or ".." in parts or any(p.startswith(".") for p in parts):
             self._send_json(404, {"error": "no such file"})
             return
-        if "/".join(parts).startswith(ATTACH_REF_PREFIX):
-            self.send_attachment("/".join(parts)[len(ATTACH_REF_PREFIX):], force_download=force_download)
+        norm_rel = "/".join(parts)
+        if norm_rel.startswith(ATTACH_REF_PREFIX):
+            self.send_attachment(norm_rel[len(ATTACH_REF_PREFIX):], force_download=force_download)
             return
+
+        store = todo_store()
+        if store.initialized():
+            rec = store.get_file_record(norm_rel)
+            if rec is not None:
+                ext = PurePosixPath(norm_rel).suffix.lower()
+                if (ext not in TEXT_EXT and ext not in MIME) or int(rec["size"]) > VIEW_MAX_BYTES:
+                    self._send_json(404, {"error": "no such file"})
+                    return
+                try:
+                    loaded = store.read_file_content(norm_rel)
+                except FileNotFoundError:
+                    commit_sha = str(rec.get("source_commit") or "")
+                    recovered = _git_read_blob_at_commit(commit_sha, norm_rel) if _SHA40_RE.fullmatch(commit_sha) else None
+                    if recovered is None:
+                        self._send_json(404, {"error": "database blob unavailable"})
+                        return
+                    try:
+                        store.store_verified_blob(rec["sha256"], recovered)
+                        loaded = (rec, recovered)
+                    except BlobIntegrityError:
+                        self._send_json(500, {"error": "database blob integrity mismatch"})
+                        return
+                except BlobIntegrityError:
+                    self._send_json(500, {"error": "database blob integrity mismatch"})
+                    return
+                if loaded is None:
+                    self._send_json(404, {"error": "database file missing"})
+                    return
+                rec, body = loaded
+                etag = f'"{rec["sha256"]}"'
+                db_headers = {
+                    "Cache-Control": "no-cache",
+                    "ETag": etag,
+                    "X-Mailroom-Source": "db",
+                    "X-Mailroom-SHA256": str(rec["sha256"]),
+                    "X-Mailroom-DB-Backend": str(store.backend_info().get("kind") or "db"),
+                }
+                if rec.get("source_commit"):
+                    db_headers["X-Mailroom-Commit"] = str(rec["source_commit"])
+                if not force_download and self._etag_matches(self.headers.get("If-None-Match"), etag):
+                    self._skip_default_cache_control = True
+                    self.send_response(304)
+                    for k, v in db_headers.items():
+                        self.send_header(k, v)
+                    self.end_headers()
+                    return
+                ctype, headers = _attachment_response_headers(Path(norm_rel), body, force_download=force_download)
+                headers.update(db_headers)
+                self._skip_default_cache_control = True
+                self._send_bytes_response(body, ctype, headers)
+                return
+
         try:
             file = REPO_DIR.joinpath(*parts).resolve()
             if not viewable_path(file, REPO_DIR):
@@ -2423,7 +3029,7 @@ class BusHandler(SimpleHTTPRequestHandler):
         except (ValueError, OSError):
             self._send_json(404, {"error": "no such file"})
             return
-        self._send_viewable(file, force_download=force_download)
+        self._send_viewable(file, force_download=force_download, extra_headers={"X-Mailroom-Source": "workspace"})
 
     def _send_bytes_response(self, body: bytes, ctype: str, headers: dict[str, str]) -> None:
         self.send_response(200)
@@ -2442,13 +3048,21 @@ class BusHandler(SimpleHTTPRequestHandler):
         ctype, headers = _attachment_response_headers(f, body, force_download=force_download)
         self._send_bytes_response(body, ctype, headers)
 
-    def _send_viewable(self, f: Path, *, force_download: bool = False) -> None:
+    def _send_viewable(
+        self,
+        f: Path,
+        *,
+        force_download: bool = False,
+        extra_headers: dict[str, str] | None = None,
+    ) -> None:
         ext = f.suffix.lower()
         if not f.is_file() or (ext not in TEXT_EXT and ext not in MIME) or f.stat().st_size > VIEW_MAX_BYTES:
             self._send_json(404, {"error": "no such attachment"})
             return
         body = f.read_bytes()
         ctype, headers = _attachment_response_headers(f, body, force_download=force_download)
+        if extra_headers:
+            headers.update(extra_headers)
         self._send_bytes_response(body, ctype, headers)
 
     def do_POST(self) -> None:  # noqa: N802
@@ -2467,7 +3081,7 @@ class BusHandler(SimpleHTTPRequestHandler):
                 return
             task_id = parse_qs(parsed.query).get("task_id", [None])[0]
             if task_id:
-                from todo_store import TodoError
+                TodoError = _sibling_module("todo_store").TodoError
 
                 try:
                     todo_read({"id": task_id}, admin=False)
@@ -2495,7 +3109,7 @@ class BusHandler(SimpleHTTPRequestHandler):
             self._send_json(400, {"error": "invalid json"})
             return
         if parsed.path == "/api/todo":
-            from todo_store import TodoError
+            TodoError = _sibling_module("todo_store").TodoError
 
             try:
                 self._send_json(200, todo_mutation(data, admin=self.admin))
@@ -2604,6 +3218,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
     if not DASHBOARD_DIR.exists():
         print(f"missing dashboard at {DASHBOARD_DIR}", file=sys.stderr)
         return 1
+    for sibling in ("coord_store", "db_backend", "todo_store", "bus_client"):
+        _sibling_module(sibling)
     migrate_registry()
     init_user_state()
     global PUBLIC_PORT
@@ -2615,6 +3231,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         servers.append(ThreadingHTTPServer(("127.0.0.1", ADMIN_PORT), type("AdminHandler", (BusHandler,), {"admin": True})))
     threading.Thread(target=reaper_loop, daemon=True).start()
     threading.Thread(target=probe_loop, daemon=True).start()
+    threading.Thread(target=file_sync_loop, daemon=True).start()
     for s in servers[1:]:
         threading.Thread(target=s.serve_forever, daemon=True).start()
     print(f"Mission control at http://{args.host}:{args.port}/ (agents, read + reply)", flush=True)
@@ -2628,7 +3245,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    from bus_client import add_todo_parser
+    add_todo_parser = _sibling_module("bus_client").add_todo_parser
 
     p = argparse.ArgumentParser(description="Agent message bus")
     sub = p.add_subparsers(dest="cmd", required=True)
